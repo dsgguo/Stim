@@ -5,7 +5,7 @@ from OpenGL.GL import *
 import time
 
 def main():
-    window_mgr = WindowManager(title="Stimulus Window", fullscreen=True)
+    window_mgr = WindowManager(title="Stimulus Window", fullscreen=False)
     if not window_mgr.initialize():
         print("Failed to initialize window")
         return
@@ -28,7 +28,7 @@ def main():
         x_pos = -0.8 + i * 0.4
         y_pos = -0.5 + i % 2 * 0.5
         color = 0.1 * i, 0.5, 1.0 - 0.1 * i
-        s = Square(x=x_pos, y=y_pos, size=0.15, color=color)
+        s = Square(x=x_pos, y=y_pos, size=0.3, color=color)
         stimuli.append(s)
         
     active_idx = 1 # Square default
@@ -54,12 +54,19 @@ def main():
 
     print("控制说明:")
     print("  TAB: 切换刺激块形状")
-    print("  UP/DOWN (上下键): 调整大小")
+    print("  WASD: 移动刺激块")
+    print("  Mouse Drag: 拖拽刺激块")
     print("  F: 切换闪烁 (开/关)")
     print("  T: 定时闪烁 (2秒)")
     print("  LEFT/RIGHT (左右键): 调整闪烁频率")
     print("  B: 触发边框闪烁")
     print("  ESC: 退出")
+
+    # Mouse State
+    is_dragging = False
+    drag_offset_x = 0.0
+    drag_offset_y = 0.0
+    last_mouse_left = glfw.RELEASE
 
     while not window_mgr.should_close():
         # Input Handling
@@ -76,11 +83,46 @@ def main():
 
         active_stim = stimuli[active_idx]
 
-        # Size Control
-        if glfw.get_key(window, glfw.KEY_UP) == glfw.PRESS:
-            active_stim.current_size = min(2.0, active_stim.current_size + 0.01)
-        if glfw.get_key(window, glfw.KEY_DOWN) == glfw.PRESS:
-            active_stim.current_size = max(0.1, active_stim.current_size - 0.01)
+        # Movement (WASD)
+        move_speed = 0.01
+        if glfw.get_key(window, glfw.KEY_W) == glfw.PRESS:
+            active_stim.y += move_speed
+        if glfw.get_key(window, glfw.KEY_S) == glfw.PRESS:
+            active_stim.y -= move_speed
+        if glfw.get_key(window, glfw.KEY_A) == glfw.PRESS:
+            active_stim.x -= move_speed
+        if glfw.get_key(window, glfw.KEY_D) == glfw.PRESS:
+            active_stim.x += move_speed
+
+        # Mouse Interaction
+        mouse_left = glfw.get_mouse_button(window, glfw.MOUSE_BUTTON_LEFT)
+        mx, my = glfw.get_cursor_pos(window)
+        win_w, win_h = window_mgr.get_window_size()
+        
+        # Convert to NDC [-1, 1]
+        # X: 0->w to -1->1 => (x/w)*2 - 1
+        # Y: 0->h to 1->-1 => 1 - (y/h)*2  (OpenGL Y is up, Screen Y is down)
+        ndc_x = (mx / win_w) * 2 - 1
+        ndc_y = 1 - (my / win_h) * 2
+
+        if mouse_left == glfw.PRESS and last_mouse_left == glfw.RELEASE:
+            # Check click hit
+            # Simple bounding box check
+            half_size = active_stim.current_size * 0.5
+            if (active_stim.x - half_size <= ndc_x <= active_stim.x + half_size) and \
+               (active_stim.y - half_size <= ndc_y <= active_stim.y + half_size):
+                is_dragging = True
+                drag_offset_x = active_stim.x - ndc_x
+                drag_offset_y = active_stim.y - ndc_y
+        
+        if mouse_left == glfw.RELEASE:
+            is_dragging = False
+            
+        if is_dragging:
+            active_stim.x = ndc_x + drag_offset_x
+            active_stim.y = ndc_y + drag_offset_y
+
+        last_mouse_left = mouse_left
 
         # Flicker Control
         f_state = glfw.get_key(window, glfw.KEY_F)

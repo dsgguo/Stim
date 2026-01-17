@@ -17,7 +17,8 @@ class WindowManager:
         glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
-        glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, True) # Required on Mac
+        if sys.platform == 'darwin':
+            glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, True) # Required on Mac
         
         glfw.window_hint(glfw.DECORATED, glfw.FALSE)
         
