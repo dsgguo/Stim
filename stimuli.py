@@ -61,6 +61,7 @@ class Stimulus:
         
         self.is_flickering = False
         self.flicker_freq = 1.0
+        self.flicker_phase = 0.0
         self.flicker_start_frame = 0
         self.flicker_start_time = 0
         self.flicker_duration = None
@@ -83,8 +84,9 @@ class Stimulus:
         # Override in subclasses
         pass
 
-    def set_flicker(self, freq, duration=None, current_frame=0):
+    def set_flicker(self, freq, phase=0.0, duration=None, current_frame=0):
         self.flicker_freq = freq
+        self.flicker_phase = phase
         self.flicker_duration = duration
         self.is_flickering = True
         self.flicker_start_frame = current_frame
@@ -110,7 +112,7 @@ class Stimulus:
             if self.flicker_duration and (current_time - self.flicker_start_time) > self.flicker_duration:
                 self.is_flickering = False
             else:
-                intensity = 0.5 * (1 + math.sin(2 * math.pi * self.flicker_freq * time_elapsed_frames))
+                intensity = 0.5 * (1 + math.sin(2 * math.pi * self.flicker_freq * time_elapsed_frames + self.flicker_phase))
                 alpha = intensity
         return alpha, current_time
 
@@ -165,6 +167,35 @@ class Stimulus:
         glBindVertexArray(self.vao)
         glDrawArrays(GL_TRIANGLE_FAN, 0, self.num_vertices)
         glBindVertexArray(0)
+
+        return {
+            "type": self.__class__.__name__,
+            "x": self.x,
+            "y": self.y,
+            "size": self.current_size,
+            "color": self.color,
+            "flicker_freq": self.flicker_freq,
+            "flicker_phase": self.flicker_phase
+        }
+
+    @staticmethod
+    def from_dict(data):
+        class_name = data.get("type", "Square")
+        # Subclasses must be available in global scope or resolved via a map
+        # Since they are in this file, we can try globals() but we need to ensure they are defined when called.
+        # However, they are defined AFTER Stimulus class. 
+        # So we better use a registry or just resolve them locally if possible, 
+        # OR put this method outside as a helper, OR use a lazy lookup.
+        # Let's use a helper dict map assuming they are defined later. 
+        # Actually, methods are bound at runtime so specific subclasses will be available in globals by the time we call this.
+        cls = globals().get(class_name)
+        if not cls:
+            return None
+        
+        obj = cls(x=data["x"], y=data["y"], size=data["size"], color=tuple(data["color"]))
+        obj.flicker_freq = data.get("flicker_freq", 1.0)
+        obj.flicker_phase = data.get("flicker_phase", 0.0)
+        return obj
 
 
 class Triangle(Stimulus):
