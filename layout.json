@@ -9,21 +9,21 @@
             0.5,
             1.0
         ],
-        "flicker_phase": 0.0,
-        "flicker_freq": 8
+        "flicker_freq": 8,
+        "flicker_phase": 0.0
     },
     {
         "type": "Square",
-        "x": -0.7997558593749999,
-        "y": -0.00950520833333345,
+        "x": -0.7994921875,
+        "y": -0.00589843750000006,
         "size": 0.3,
         "color": [
             0.1,
             0.5,
             0.9
         ],
-        "flicker_phase": 0.0,
-        "flicker_freq": 9
+        "flicker_freq": 2.8000000000000167,
+        "flicker_phase": 0.0
     },
     {
         "type": "Square",
@@ -35,8 +35,8 @@
             0.5,
             0.8
         ],
-        "flicker_phase": 0.0,
-        "flicker_freq": 10
+        "flicker_freq": 10,
+        "flicker_phase": 0.0
     },
     {
         "type": "Square",
@@ -48,8 +48,8 @@
             0.5,
             0.7
         ],
-        "flicker_phase": 0.0,
-        "flicker_freq": 11
+        "flicker_freq": 11,
+        "flicker_phase": 0.0
     },
     {
         "type": "Square",
@@ -61,8 +61,8 @@
             0.5,
             0.6
         ],
-        "flicker_phase": 0.0,
-        "flicker_freq": 12
+        "flicker_freq": 12,
+        "flicker_phase": 0.0
     },
     {
         "type": "Square",
@@ -74,7 +74,7 @@
             0.5,
             0.5
         ],
-        "flicker_phase": 0.0,
-        "flicker_freq": 13
+        "flicker_freq": 13,
+        "flicker_phase": 0.0
     }
 ]

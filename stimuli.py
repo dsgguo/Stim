@@ -168,6 +168,7 @@ class Stimulus:
         glDrawArrays(GL_TRIANGLE_FAN, 0, self.num_vertices)
         glBindVertexArray(0)
 
+    def to_dict(self):
         return {
             "type": self.__class__.__name__,
             "x": self.x,
@@ -177,6 +178,8 @@ class Stimulus:
             "flicker_freq": self.flicker_freq,
             "flicker_phase": self.flicker_phase
         }
+
+
 
     @staticmethod
     def from_dict(data):

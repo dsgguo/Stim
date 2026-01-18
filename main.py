@@ -72,13 +72,12 @@ def main(width=800, height=600, xpos=None, ypos=None):
 
     print("控制说明:")
     print("  TAB: 切换刺激块形状")
-    print("  WASD: 移动刺激块")
+    print("  ARROW KEYS: 移动刺激块")
     print("  Mouse Drag: 拖拽刺激块")
     print("  F: 切换闪烁 (开/关)")
     print("  Shift+F: 全局闪烁开关")
     print("  T: 定时闪烁 (2秒)")
     print("  Shift+T: 序列闪烁 (3轮, 每轮2秒, 间隔1秒)")
-    print("  LEFT/RIGHT (左右键): 调整闪烁频率")
     print("  B: 触发边框闪烁")
     print("  Ctrl+S: 保存当前布局")
     print("  Right Mouse Drag: 移动窗口")
@@ -121,15 +120,15 @@ def main(width=800, height=600, xpos=None, ypos=None):
 
         active_stim = stimuli[active_idx]
 
-        # Movement (WASD)
+        # Movement (Arrow Keys)
         move_speed = 0.01
-        if glfw.get_key(window, glfw.KEY_W) == glfw.PRESS:
+        if glfw.get_key(window, glfw.KEY_UP) == glfw.PRESS:
             active_stim.y += move_speed
-        if glfw.get_key(window, glfw.KEY_S) == glfw.PRESS:
+        if glfw.get_key(window, glfw.KEY_DOWN) == glfw.PRESS:
             active_stim.y -= move_speed
-        if glfw.get_key(window, glfw.KEY_A) == glfw.PRESS:
+        if glfw.get_key(window, glfw.KEY_LEFT) == glfw.PRESS:
             active_stim.x -= move_speed
-        if glfw.get_key(window, glfw.KEY_D) == glfw.PRESS:
+        if glfw.get_key(window, glfw.KEY_RIGHT) == glfw.PRESS:
             active_stim.x += move_speed
 
         # Mouse Interaction
@@ -267,13 +266,7 @@ def main(width=800, height=600, xpos=None, ypos=None):
                         seq_start_time = current_time
                         print(f"序列闪烁: 第 {seq_round + 1} 轮 (ON)")
 
-        # Flicker Frequency
-        if glfw.get_key(window, glfw.KEY_RIGHT) == glfw.PRESS:
-            active_stim.flicker_freq += 0.1
-            print(f"频率: {active_stim.flicker_freq:.1f} Hz", end='\r')
-        if glfw.get_key(window, glfw.KEY_LEFT) == glfw.PRESS:
-             active_stim.flicker_freq = max(0.1, active_stim.flicker_freq - 0.1)
-             print(f"频率: {active_stim.flicker_freq:.1f} Hz", end='\r')
+
 
         # Border Flash
         b_state = glfw.get_key(window, glfw.KEY_B)
