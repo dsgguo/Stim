@@ -8,8 +8,8 @@ import argparse
 import json
 import os
 
-def main(width=800, height=600):
-    window_mgr = WindowManager(width=width, height=height, title="Stimulus Window", fullscreen=False)
+def main(width=800, height=600, xpos=None, ypos=None):
+    window_mgr = WindowManager(width=width, height=height, title="Stimulus Window", fullscreen=False, xpos=xpos, ypos=ypos)
     if not window_mgr.initialize():
         print("Failed to initialize window")
         return
@@ -76,20 +76,26 @@ def main(width=800, height=600):
     print("  Mouse Drag: 拖拽刺激块")
     print("  F: 切换闪烁 (开/关)")
     print("  Shift+F: 全局闪烁开关")
-
     print("  T: 定时闪烁 (2秒)")
     print("  Shift+T: 序列闪烁 (3轮, 每轮2秒, 间隔1秒)")
     print("  LEFT/RIGHT (左右键): 调整闪烁频率")
     print("  B: 触发边框闪烁")
     print("  Ctrl+S: 保存当前布局")
+    print("  Right Mouse Drag: 移动窗口")
     print("  ESC: 退出")
 
     # Mouse State
     is_dragging = False
     drag_offset_x = 0.0
     drag_offset_y = 0.0
-
+    
+    # Window Drag State
+    is_win_dragging = False
+    win_drag_start_x = 0
+    win_drag_start_y = 0
+    
     last_mouse_left = glfw.RELEASE
+    last_mouse_right = glfw.RELEASE
     
     # Sequence State
     is_sequencing = False
@@ -166,6 +172,29 @@ def main(width=800, height=600):
             active_stim.y = ndc_y + drag_offset_y
 
         last_mouse_left = mouse_left
+
+        # Window Movement (Right Mouse Drag)
+        mouse_right = glfw.get_mouse_button(window, glfw.MOUSE_BUTTON_RIGHT)
+        if mouse_right == glfw.PRESS and last_mouse_right == glfw.RELEASE:
+             is_win_dragging = True
+             # Record initial click pos
+             win_drag_start_x, win_drag_start_y = glfw.get_cursor_pos(window)
+        
+        if mouse_right == glfw.RELEASE:
+             is_win_dragging = False
+        
+        if is_win_dragging:
+             cx, cy = glfw.get_cursor_pos(window)
+             wx, wy = glfw.get_window_pos(window)
+             # Delta = current_cursor - start_cursor
+             # We simply move the window by this delta. 
+             # Note: Moving window moves the coordinate system, so cursor pos relative to window *might* stay same if we dont move mouse.
+             # Actually if we move window +dx, the window moves under cursor. 
+             # If we just move window, the relative cursor pos changes? No.
+             # Ideally: new_win_pos = old_win_pos + (cx - win_drag_start_x)
+             glfw.set_window_pos(window, int(wx + cx - win_drag_start_x), int(wy + cy - win_drag_start_y))
+
+        last_mouse_right = mouse_right
 
         # Flicker Control
         f_state = glfw.get_key(window, glfw.KEY_F)
@@ -284,5 +313,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--width", type=int, default=800, help="Window width")
     parser.add_argument("--height", type=int, default=600, help="Window height")
+    parser.add_argument("--x", type=int, default=None, help="Window X position")
+    parser.add_argument("--y", type=int, default=None, help="Window Y position")
     args = parser.parse_args()
-    main(width=args.width, height=args.height)
+    main(width=args.width, height=args.height, xpos=args.x, ypos=args.y)

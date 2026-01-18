@@ -2,11 +2,13 @@ import glfw
 import sys
 
 class WindowManager:
-    def __init__(self, width=800, height=600, title="Stimulus", fullscreen=False):
+    def __init__(self, width=800, height=600, title="Stimulus", fullscreen=False, xpos=None, ypos=None):
         self.width = width
         self.height = height
         self.title = title
         self.fullscreen = fullscreen
+        self.xpos = xpos
+        self.ypos = ypos
         self.window = None
 
     def initialize(self):
@@ -38,6 +40,9 @@ class WindowManager:
         if not self.window:
             glfw.terminate()
             return False
+
+        if self.xpos is not None and self.ypos is not None:
+            glfw.set_window_pos(self.window, self.xpos, self.ypos)
 
         glfw.make_context_current(self.window)
         glfw.swap_interval(1) # Enable V-Sync
