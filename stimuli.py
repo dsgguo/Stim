@@ -132,7 +132,7 @@ class Stimulus:
         # glUniformMatrix4fv with transpose=GL_TRUE for row-major numpy arrays.
         return mat
 
-    def draw(self, current_frame=0, refresh_rate=60.0):
+    def draw(self, current_frame=0, refresh_rate=60.0, active=False):
         if self.shader is None:
             return
 
@@ -140,13 +140,26 @@ class Stimulus:
         
         alpha, current_time = self.update_alpha(current_frame, refresh_rate)
         
-        # 1. Draw Border if flashing
+        # 1. Draw Selection Highlight (Active state)
+        if active:
+            # Draw a faint gray border/box around it
+            model = self.get_model_matrix(scale_mult=1.1)
+            model_loc = glGetUniformLocation(self.shader, "model")
+            glUniformMatrix4fv(model_loc, 1, GL_TRUE, model)
+            
+            color_loc = glGetUniformLocation(self.shader, "color")
+            # Dim white/gray highlight
+            glUniform4f(color_loc, 0.5, 0.5, 0.5, 0.3)
+            
+            glBindVertexArray(self.vao)
+            glDrawArrays(GL_TRIANGLE_FAN, 0, self.num_vertices)
+
+        # 2. Draw Border Flash (Triggered by 'B' or serial)
         if self.is_flashing_border:
             if current_time - self.border_flash_start_time > self.border_flash_duration:
                 self.is_flashing_border = False
             else:
-                # Draw slightly larger or wireframe
-                model = self.get_model_matrix(scale_mult=1.2) # Make border larger
+                model = self.get_model_matrix(scale_mult=1.2)
                 model_loc = glGetUniformLocation(self.shader, "model")
                 glUniformMatrix4fv(model_loc, 1, GL_TRUE, model)
                 
@@ -156,7 +169,7 @@ class Stimulus:
                 glBindVertexArray(self.vao)
                 glDrawArrays(GL_TRIANGLE_FAN, 0, self.num_vertices)
 
-        # 2. Draw Main Shape
+        # 3. Draw Main Shape
         model = self.get_model_matrix()
         model_loc = glGetUniformLocation(self.shader, "model")
         glUniformMatrix4fv(model_loc, 1, GL_TRUE, model)
@@ -184,13 +197,7 @@ class Stimulus:
     @staticmethod
     def from_dict(data):
         class_name = data.get("type", "Square")
-        # Subclasses must be available in global scope or resolved via a map
-        # Since they are in this file, we can try globals() but we need to ensure they are defined when called.
-        # However, they are defined AFTER Stimulus class. 
-        # So we better use a registry or just resolve them locally if possible, 
-        # OR put this method outside as a helper, OR use a lazy lookup.
-        # Let's use a helper dict map assuming they are defined later. 
-        # Actually, methods are bound at runtime so specific subclasses will be available in globals by the time we call this.
+        
         cls = globals().get(class_name)
         if not cls:
             return None
@@ -252,7 +259,7 @@ class Square(Stimulus):
         # GL_TRIANGLE_FAN: v0 is center. 
         # Let's use GL_TRIANGLE_FAN and simple order. 
         # Vertices: TR, BR, BL, TL. 
-        # Fan from TR: TR -> BR -> BL (Tri 1), TR -> BL -> TL (Tri 2). Yes.
+        # Fan from TR: TR -> BR -> BL (Tri 1), TR -> BL -> TL (Tri 2). 
         
         glBufferData(GL_ARRAY_BUFFER, vertices.nbytes, vertices, GL_STATIC_DRAW)
         

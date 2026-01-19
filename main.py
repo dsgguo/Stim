@@ -1,6 +1,8 @@
 import glfw
 from window_manager import WindowManager
 from stimuli import Triangle, Square, Circle, create_shader_program, Stimulus
+from trigger_manager import SerialTrigger
+from experiment_manager import ExperimentManager
 from OpenGL.GL import *
 import time
 
@@ -8,11 +10,16 @@ import argparse
 import json
 import os
 
-def main(width=800, height=600, xpos=None, ypos=None):
+def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='free'):
     window_mgr = WindowManager(width=width, height=height, title="Stimulus Window", fullscreen=False, xpos=xpos, ypos=ypos)
     if not window_mgr.initialize():
         print("Failed to initialize window")
         return
+
+    # Initialize Trigger
+    trigger = None
+    if serial_port:
+        trigger = SerialTrigger(serial_port)
 
     # Initialize Shader
     shader_program = create_shader_program()
@@ -36,9 +43,9 @@ def main(width=800, height=600, xpos=None, ypos=None):
     
     if not stimuli:
         print("Using default layout.")
-        tri = Triangle(x=-0.6, y=0.0, color=(0.0, 1.0, 0.0))
-        sq = Square(x=0.0, y=0.0, color=(0.0, 0.0, 1.0))
-        circ = Circle(x=0.6, y=0.0, color=(1.0, 0.0, 1.0))
+        # tri = Triangle(x=-0.6, y=0.0, color=(0.0, 1.0, 0.0))
+        # sq = Square(x=0.0, y=0.0, color=(0.0, 0.0, 1.0))
+        # circ = Circle(x=0.6, y=0.0, color=(1.0, 0.0, 1.0))
 
         num_stimuli = 6
         for i in range(num_stimuli):
@@ -53,7 +60,15 @@ def main(width=800, height=600, xpos=None, ypos=None):
     for s in stimuli:
         s.init_gl(shader_program)
 
+
+    # Experiment Manager
+    experiment_mgr = None
+    if mode != 'free':
+        experiment_mgr = ExperimentManager(mode, stimuli, trigger)
+        experiment_mgr.start()
+    
     # Transparency settings
+    is_bg_transparent = True
     glClearColor(0.0, 0.0, 0.0, 0.0)
     glEnable(GL_BLEND)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
@@ -69,6 +84,7 @@ def main(width=800, height=600, xpos=None, ypos=None):
     last_b_state = glfw.RELEASE
     last_tab_state = glfw.RELEASE
     last_s_state = glfw.RELEASE # For Ctrl+S
+    last_g_state = glfw.RELEASE # For Background Toggle
 
     print("控制说明:")
     print("  TAB: 切换刺激块形状")
@@ -79,7 +95,9 @@ def main(width=800, height=600, xpos=None, ypos=None):
     print("  T: 定时闪烁 (2秒)")
     print("  Shift+T: 序列闪烁 (3轮, 每轮2秒, 间隔1秒)")
     print("  B: 触发边框闪烁")
+    print("  G: 切换背景透明度")
     print("  Ctrl+S: 保存当前布局")
+    print("  M: 模拟结果反馈(Mode 1, Key 1-6)")
     print("  Right Mouse Drag: 移动窗口")
     print("  ESC: 退出")
 
@@ -97,13 +115,9 @@ def main(width=800, height=600, xpos=None, ypos=None):
     last_mouse_right = glfw.RELEASE
     
     # Sequence State
+    # Sequence State (Legacy - kept for 'free' mode or manual override)
+    # The ExperimentManager handles this for specific modes
     is_sequencing = False
-    seq_start_time = 0
-    seq_round = 0
-    seq_phase = 0 # 0: ON, 1: OFF
-    SEQ_ON_DURATION = 2.0
-    SEQ_OFF_DURATION = 1.0
-    SEQ_TOTAL_ROUNDS = 3
 
     while not window_mgr.should_close():
         # Input Handling
@@ -201,12 +215,15 @@ def main(width=800, height=600, xpos=None, ypos=None):
             # Check modifier for Global Flicker
             if glfw.get_key(window, glfw.KEY_LEFT_SHIFT) == glfw.PRESS or \
                glfw.get_key(window, glfw.KEY_RIGHT_SHIFT) == glfw.PRESS:
-                # Global Toggle: If any are OFF -> Turn ALL ON. If ALL ON -> Turn ALL OFF.
+                # Global Toggle
                 any_off = any(not s.is_flickering for s in stimuli)
-                for s in stimuli:
-                    if any_off:
+                if any_off:
+                    for s in stimuli:
                         s.set_flicker(freq=s.flicker_freq, current_frame=frame_count)
-                    else:
+                    if trigger:
+                        trigger.write_event(100) # Global Start Tag
+                else:
+                    for s in stimuli:
                         s.stop_flicker()
                 print(f"全局闪烁: {'开启' if any_off else '停止'}")
             else:
@@ -216,13 +233,31 @@ def main(width=800, height=600, xpos=None, ypos=None):
                     print("闪烁已停止")
                 else:
                     active_stim.set_flicker(freq=active_stim.flicker_freq, current_frame=frame_count)
+                    if trigger:
+                        trigger.write_event(active_idx + 1)
                     print("闪烁已开始 (持续)")
         last_f_state = f_state
 
         # Timed Flicker (Test duration of 2.0s)
         if glfw.get_key(window, glfw.KEY_T) == glfw.PRESS:
-            active_stim.set_flicker(freq=active_stim.flicker_freq, duration=2.0, current_frame=frame_count)
-            print("闪烁已开始 (2.0秒)")
+             if glfw.get_key(window, glfw.KEY_LEFT_SHIFT) != glfw.PRESS and \
+                glfw.get_key(window, glfw.KEY_RIGHT_SHIFT) != glfw.PRESS:
+                 active_stim.set_flicker(freq=active_stim.flicker_freq, duration=2.0, current_frame=frame_count)
+                 if trigger:
+                     trigger.write_event(active_idx + 1)
+                 print("闪烁已开始 (2.0秒)")
+
+        # Background Toggle (G Key)
+        g_state = glfw.get_key(window, glfw.KEY_G)
+        if g_state == glfw.PRESS and last_g_state == glfw.RELEASE:
+            is_bg_transparent = not is_bg_transparent
+            if is_bg_transparent:
+                glClearColor(0.0, 0.0, 0.0, 0.0)
+                print("背景: 透明")
+            else:
+                glClearColor(0.0, 0.0, 0.0, 1.0)
+                print("背景: 黑色")
+        last_g_state = g_state
 
         # Sequenced Flicker (Shift + T)
         t_key = glfw.get_key(window, glfw.KEY_T)
@@ -237,6 +272,9 @@ def main(width=800, height=600, xpos=None, ypos=None):
                      # Start All
                      for s in stimuli:
                          s.set_flicker(freq=s.flicker_freq, current_frame=frame_count)
+                     if trigger:
+                         # Event ID for global/sequence: 100
+                         trigger.write_event(100)
                      print("序列闪烁开始: 第 1 轮 (ON)")
         
         # Sequence Update Loop
@@ -262,6 +300,8 @@ def main(width=800, height=600, xpos=None, ypos=None):
                         # Start Next Round
                         for s in stimuli:
                             s.set_flicker(freq=s.flicker_freq, current_frame=frame_count)
+                        if trigger:
+                            trigger.write_event(100)
                         seq_phase = 0
                         seq_start_time = current_time
                         print(f"序列闪烁: 第 {seq_round + 1} 轮 (ON)")
@@ -290,11 +330,26 @@ def main(width=800, height=600, xpos=None, ypos=None):
         last_s_state = s_key
 
 
+        # Update Experiment Manager
+        if experiment_mgr:
+            experiment_mgr.update(time.time(), frame_count)
+            
+            # Simulated Feedback for Online Discrete (Mode 1)
+            # Keys 1-6 map to result_idx 0-5
+            if experiment_mgr.mode == 'online_discrete':
+                for i in range(6):
+                    key_code = getattr(glfw, f"KEY_{i+1}")
+                    if glfw.get_key(window, key_code) == glfw.PRESS:
+                        # Simple debounce needed? Maybe for this test okay
+                         experiment_mgr.trigger_feedback(i)
+
         # Render
         glClear(GL_COLOR_BUFFER_BIT)
         
-        for s in stimuli:
-            s.draw(current_frame=frame_count, refresh_rate=refresh_rate)
+        for i, s in enumerate(stimuli):
+            # Pass active state to highlight the selected one
+            is_active = (i == active_idx)
+            s.draw(current_frame=frame_count, refresh_rate=refresh_rate, active=is_active)
 
         window_mgr.swap_buffers()
         window_mgr.poll_events()
@@ -308,5 +363,7 @@ if __name__ == "__main__":
     parser.add_argument("--height", type=int, default=600, help="Window height")
     parser.add_argument("--x", type=int, default=None, help="Window X position")
     parser.add_argument("--y", type=int, default=None, help="Window Y position")
+    parser.add_argument("--port", type=str, default=None, help="Serial port for trigger")
+    parser.add_argument("--mode", type=str, default="free", choices=['free', 'offline', 'online_discrete', 'online_continuous'], help="Experiment Mode")
     args = parser.parse_args()
-    main(width=args.width, height=args.height, xpos=args.x, ypos=args.y)
+    main(width=args.width, height=args.height, xpos=args.x, ypos=args.y, serial_port=args.port, mode=args.mode)
