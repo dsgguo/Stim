@@ -10,6 +10,11 @@ import argparse
 import json
 import os
 
+# Stimulus Sequence Constants
+SEQ_ON_DURATION = 2.0
+SEQ_OFF_DURATION = 1.0
+SEQ_TOTAL_ROUNDS = 3
+
 def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='free'):
     window_mgr = WindowManager(width=width, height=height, title="Stimulus Window", fullscreen=False, xpos=xpos, ypos=ypos)
     if not window_mgr.initialize():
