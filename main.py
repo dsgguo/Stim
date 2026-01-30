@@ -347,6 +347,10 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
                     if glfw.get_key(window, key_code) == glfw.PRESS:
                         # Simple debounce needed? Maybe for this test okay
                          experiment_mgr.trigger_feedback(i)
+            
+            # Resume/Start with Space
+            if glfw.get_key(window, glfw.KEY_SPACE) == glfw.PRESS:
+                experiment_mgr.resume()
 
         # Render
         glClear(GL_COLOR_BUFFER_BIT)
@@ -371,4 +375,4 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=str, default=None, help="Serial port for trigger")
     parser.add_argument("--mode", type=str, default="free", choices=['free', 'offline', 'online_discrete', 'online_continuous'], help="Experiment Mode")
     args = parser.parse_args()
-    main(width=args.width, height=args.height, xpos=args.x, ypos=args.y, serial_port=args.port, mode=args.mode)
+    main(width=args.width, height=args.height, xpos=args.x, ypos=args.y, serial_port=args.port, mode="offline")

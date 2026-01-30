@@ -21,6 +21,7 @@ class ExperimentManager:
         self.STATE_FLICKER = 3
         self.STATE_FEEDBACK = 4
         self.STATE_WAIT = 5 # Wait for classifier result (Online Discrete)
+        self.STATE_PAUSE = 6 # Initial pause before experiment starts
 
         self.state = self.STATE_IDLE
         self.state_start_time = 0
@@ -36,7 +37,7 @@ class ExperimentManager:
         
         # Offline Sequence
         self.offline_sequence = []
-        self.offline_round = 0
+        self.current_trial_idx = 0
         self.TOTAL_OFFLINE_ROUNDS = 5 # Default, can be tailored
 
         # Continuous State
@@ -49,19 +50,21 @@ class ExperimentManager:
         if self.mode == 'offline':
             # Generate random target sequence
             # E.g. block of 10 trials, randomized targets
-            self._generate_offline_sequence(count=self.TOTAL_OFFLINE_ROUNDS)
-            self.offline_round = 0
-            self._enter_state(self.STATE_REST)
+            self._generate_offline_sequence(rounds=self.TOTAL_OFFLINE_ROUNDS)
+            self.current_trial_idx = 0
+            # Start in PAUSE
+            self._enter_state(self.STATE_PAUSE)
+            print("Press SPACE to start Offline Experiment...")
             
         elif self.mode == 'online_discrete':
-            self._enter_state(self.STATE_REST)
+            # Start in PAUSE
+            self._enter_state(self.STATE_PAUSE)
+            print("Press SPACE to start Online Discrete Experiment...")
             
         elif self.mode == 'online_continuous':
-            self._enter_state(self.STATE_FLICKER)
-            # Start all flicker immediately
-            for s in self.stimuli:
-                 s.set_flicker(freq=s.flicker_freq, current_frame=0) 
-            self.last_tag_time = time.time()
+            # Start in PAUSE
+            self._enter_state(self.STATE_PAUSE)
+            print("Press SPACE to start Online Continuous Experiment...")
 
     def update(self, current_time, frame_count):
         elapsed = current_time - self.state_start_time
@@ -78,8 +81,8 @@ class ExperimentManager:
         self.state_start_time = time.time()
         self.state_start_frame = frame_count
         
-        state_names = {0:'IDLE', 1:'REST', 2:'CUE', 3:'FLICKER', 4:'FEEDBACK', 5:'WAIT'}
-        print(f"[State] -> {state_names.get(new_state, 'UNKNOWN')}")
+        # state_names = {0:'IDLE', 1:'REST', 2:'CUE', 3:'FLICKER', 4:'FEEDBACK', 5:'WAIT'}
+        # print(f"[State] -> {state_names.get(new_state, 'UNKNOWN')}")
 
         if new_state == self.STATE_REST:
             self._stop_all_flicker()
@@ -119,8 +122,14 @@ class ExperimentManager:
     def _update_offline(self, elapsed, current_time, frame_count):
         if self.state == self.STATE_REST:
             if elapsed > self.t_rest:
-                if self.offline_round < len(self.offline_sequence):
-                    self.target_idx = self.offline_sequence[self.offline_round]
+                if self.current_trial_idx < len(self.offline_sequence):
+                    # Calculate Round info
+                    num_stim = len(self.stimuli)
+                    current_round = (self.current_trial_idx // num_stim) + 1
+                    trial_in_round = (self.current_trial_idx % num_stim) + 1
+                    print(f"Round {current_round}/{self.TOTAL_OFFLINE_ROUNDS}, Trial {trial_in_round}/{num_stim} (Global: {self.current_trial_idx + 1})")
+
+                    self.target_idx = self.offline_sequence[self.current_trial_idx]
                     self._enter_state(self.STATE_CUE, frame_count)
                 else:
                     self._enter_state(self.STATE_IDLE)
@@ -132,7 +141,7 @@ class ExperimentManager:
 
         elif self.state == self.STATE_FLICKER:
             if elapsed > self.t_flicker:
-                self.offline_round += 1
+                self.current_trial_idx += 1
                 self._enter_state(self.STATE_REST, frame_count)
 
     def _update_online_discrete(self, elapsed, current_time, frame_count):
@@ -157,6 +166,9 @@ class ExperimentManager:
                 self._enter_state(self.STATE_REST, frame_count)
 
     def _update_online_continuous(self, elapsed, current_time, frame_count):
+        if self.state == self.STATE_PAUSE:
+            return
+
         # Always flickering
         # Send periodic tags
         if current_time - self.last_tag_time > self.t_continuous_tag_interval:
@@ -178,8 +190,29 @@ class ExperimentManager:
         for s in self.stimuli:
             s.stop_flicker()
 
-    def _generate_offline_sequence(self, count=10):
-        # Random sequence
+    def resume(self):
+        """ Resume from PAUSE state manually (e.g. key press) """
+        if self.state == self.STATE_PAUSE:
+            if self.mode == 'offline':
+                self._enter_state(self.STATE_REST)
+            elif self.mode == 'online_discrete':
+                self._enter_state(self.STATE_REST)
+            elif self.mode == 'online_continuous':
+                self._enter_state(self.STATE_FLICKER)
+                # For continuous, we need to explicitly start flicker here now
+                for s in self.stimuli:
+                    s.set_flicker(freq=s.flicker_freq, current_frame=0)
+                self.last_tag_time = time.time()
+
+    def _generate_offline_sequence(self, rounds=5):
+        # Block Randomization: Each round contains all stimuli once in random order
+        self.offline_sequence = []
         ids = list(range(len(self.stimuli)))
-        self.offline_sequence = [random.choice(ids) for _ in range(count)]
-        print(f"Generated Sequence: {self.offline_sequence}")
+        
+        for r in range(rounds):
+            # Shuffle a copy of ids for this round
+            r_ids = ids[:]
+            # random.shuffle(r_ids)
+            self.offline_sequence.extend(r_ids)
+            
+        print(f"Generated Sequence ({rounds} rounds, {len(self.offline_sequence)} trials): {self.offline_sequence}")
