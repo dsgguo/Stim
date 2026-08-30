@@ -12,6 +12,13 @@ class WindowManager:
         self.window = None
 
     def initialize(self):
+        import ctypes
+        try:
+            # 开启高DPI感知，防止Windows因为缩放导致窗口变黑/透明度失效以及大小错位
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            pass
+
         if not glfw.init():
             return False
 
@@ -26,6 +33,7 @@ class WindowManager:
         
         # Transparency hint
         glfw.window_hint(glfw.TRANSPARENT_FRAMEBUFFER, glfw.TRUE)
+        glfw.window_hint(glfw.ALPHA_BITS, 8) # 确保有Alpha通道来支持透明
         glfw.window_hint(glfw.RESIZABLE, glfw.TRUE)
 
         monitor = None

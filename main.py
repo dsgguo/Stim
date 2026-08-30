@@ -3,19 +3,56 @@ from window_manager import WindowManager
 from stimuli import Triangle, Square, Circle, create_shader_program, Stimulus
 from trigger_manager import SerialTrigger
 from experiment_manager import ExperimentManager
+from feedback_receiver import FeedbackReceiver
 from OpenGL.GL import *
 import time
 
 import argparse
 import json
 import os
+from startup_menu import select_mode
 
 # Stimulus Sequence Constants
 SEQ_ON_DURATION = 2.0
 SEQ_OFF_DURATION = 1.0
 SEQ_TOTAL_ROUNDS = 3
 
+
+def save_layout(window, stimuli):
+    wx, wy = glfw.get_window_pos(window)
+    ww, wh = glfw.get_window_size(window)
+    data = {
+        "window": {"x": wx, "y": wy, "width": ww, "height": wh},
+        "stimuli": [s.to_dict() for s in stimuli],
+    }
+    with open('layout.json', 'w') as f:
+        json.dump(data, f, indent=4)
+    print("布局已保存到 layout.json")
+
 def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='free'):
+    # 先读取布局，以支持覆盖窗口的尺寸与位置
+    stimuli = []
+    if os.path.exists('layout.json'):
+        print("加载布局文件 layout.json...")
+        try:
+            with open('layout.json', 'r') as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    win_cfg = data.get("window", {})
+                    width = win_cfg.get("width", width)
+                    height = win_cfg.get("height", height)
+                    xpos = win_cfg.get("x", xpos)
+                    ypos = win_cfg.get("y", ypos)
+                    for d in data.get("stimuli", []):
+                        s = Stimulus.from_dict(d)
+                        if s: stimuli.append(s)
+                elif isinstance(data, list):
+                    for d in data:
+                        s = Stimulus.from_dict(d)
+                        if s: stimuli.append(s)
+        except Exception as e:
+            print(f"Failed to load layout: {e}")
+
     window_mgr = WindowManager(width=width, height=height, title="Stimulus Window", fullscreen=False, xpos=xpos, ypos=ypos)
     if not window_mgr.initialize():
         print("Failed to initialize window")
@@ -33,19 +70,6 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
         window_mgr.terminate()
         return
 
-    # Create Stimuli
-    stimuli = []
-    if os.path.exists('layout.json'):
-        print("加载布局文件 layout.json...")
-        try:
-            with open('layout.json', 'r') as f:
-                data = json.load(f)
-                for d in data:
-                    s = Stimulus.from_dict(d)
-                    if s: stimuli.append(s)
-        except Exception as e:
-            print(f"Failed to load layout: {e}")
-    
     if not stimuli:
         print("Using default layout.")
         # tri = Triangle(x=-0.6, y=0.0, color=(0.0, 1.0, 0.0))
@@ -68,8 +92,12 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
 
     # Experiment Manager
     experiment_mgr = None
+    feedback_receiver = None
     if mode != 'free':
-        experiment_mgr = ExperimentManager(mode, stimuli, trigger)
+        if mode == 'online_continuous':
+            feedback_receiver = FeedbackReceiver(ip='0.0.0.0', port=5006)
+            feedback_receiver.start()
+        experiment_mgr = ExperimentManager(mode, stimuli, trigger, feedback_receiver)
         experiment_mgr.start()
     
     # Transparency settings
@@ -92,19 +120,28 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
     last_g_state = glfw.RELEASE # For Background Toggle
 
     print("控制说明:")
-    print("  TAB: 切换刺激块形状")
-    print("  ARROW KEYS: 移动刺激块")
-    print("  Mouse Drag: 拖拽刺激块")
-    print("  F: 切换闪烁 (开/关)")
-    print("  Shift+F: 全局闪烁开关")
-    print("  T: 定时闪烁 (2秒)")
-    print("  Shift+T: 序列闪烁 (3轮, 每轮2秒, 间隔1秒)")
-    print("  B: 触发边框闪烁")
-    print("  G: 切换背景透明度")
-    print("  Ctrl+S: 保存当前布局")
-    print("  M: 模拟结果反馈(Mode 1, Key 1-6)")
-    print("  Right Mouse Drag: 移动窗口")
-    print("  ESC: 退出")
+    if mode == 'free':
+        print("  TAB: 切换刺激块形状")
+        print("  ARROW KEYS: 移动刺激块")
+        print("  Mouse Drag: 拖拽刺激块")
+        print("  F: 切换闪烁 (开/关)")
+        print("  Shift+F: 全局闪烁开关")
+        print("  T: 定时闪烁 (2秒)")
+        print("  Shift+T: 序列闪烁 (3轮, 每轮2秒, 间隔1秒)")
+        print("  B: 触发边框闪烁")
+        print("  G: 切换背景透明度")
+        print("  Ctrl+S: 保存当前布局")
+        print("  Right Mouse Drag: 移动窗口")
+        print("  ESC: 自动保存并返回选择界面")
+    else:
+        print("  TAB: 切换刺激块形状 (高亮)")
+        print("  F: 切换闪烁 (开/关)")
+        print("  Shift+F: 全局闪烁开关")
+        print("  G: 切换背景透明度")
+        print("  SPACE: 开始/继续实验")
+        print("  M / 数字键 1-6: 模拟分类结果反馈 (online_discrete)")
+        print("  Right Mouse Drag: 移动窗口")
+        print("  ESC: 返回选择界面")
 
     # Mouse State
     is_dragging = False
@@ -128,6 +165,8 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
         # Input Handling
         window = window_mgr.window
         if glfw.get_key(window, glfw.KEY_ESCAPE) == glfw.PRESS:
+            if mode == 'free':
+                save_layout(window, stimuli)
             glfw.set_window_should_close(window, True)
 
         # Cycle Stimulus
@@ -139,57 +178,60 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
 
         active_stim = stimuli[active_idx]
 
-        # Movement (Arrow Keys)
-        move_speed = 0.01
-        if glfw.get_key(window, glfw.KEY_UP) == glfw.PRESS:
-            active_stim.y += move_speed
-        if glfw.get_key(window, glfw.KEY_DOWN) == glfw.PRESS:
-            active_stim.y -= move_speed
-        if glfw.get_key(window, glfw.KEY_LEFT) == glfw.PRESS:
-            active_stim.x -= move_speed
-        if glfw.get_key(window, glfw.KEY_RIGHT) == glfw.PRESS:
-            active_stim.x += move_speed
+        # Movement (Arrow Keys) — Design mode only
+        if mode == 'free':
+            move_speed = 0.01
+            if glfw.get_key(window, glfw.KEY_UP) == glfw.PRESS:
+                active_stim.y += move_speed
+            if glfw.get_key(window, glfw.KEY_DOWN) == glfw.PRESS:
+                active_stim.y -= move_speed
+            if glfw.get_key(window, glfw.KEY_LEFT) == glfw.PRESS:
+                active_stim.x -= move_speed
+            if glfw.get_key(window, glfw.KEY_RIGHT) == glfw.PRESS:
+                active_stim.x += move_speed
 
         # Mouse Interaction
         mouse_left = glfw.get_mouse_button(window, glfw.MOUSE_BUTTON_LEFT)
         mx, my = glfw.get_cursor_pos(window)
         win_w, win_h = window_mgr.get_window_size()
-        
+
         # Convert to NDC [-1, 1]
         # X: 0->w to -1->1 => (x/w)*2 - 1
         # Y: 0->h to 1->-1 => 1 - (y/h)*2  (OpenGL Y is up, Screen Y is down)
         ndc_x = (mx / win_w) * 2 - 1
         ndc_y = 1 - (my / win_h) * 2
 
-        if mouse_left == glfw.PRESS and last_mouse_left == glfw.RELEASE:
-            # Check click hit for ALL stimuli
-            clicked_idx = -1
-            for i, s in enumerate(stimuli):
-                half_size = s.current_size * 0.5
-                if (s.x - half_size <= ndc_x <= s.x + half_size) and \
-                   (s.y - half_size <= ndc_y <= s.y + half_size):
-                    clicked_idx = i
-                    # Don't break immediately if we want z-order, but stimuli list order is drawing order (last on top)
-                    # So we should prob pick the last one that matches.
-                    # Let's just pick the first one found for simplicity or reverse iterate.
-            
-            if clicked_idx != -1:
-                active_idx = clicked_idx
-                active_stim = stimuli[active_idx] # Update reference immediately
-                print(f"选中刺激块: {type(active_stim).__name__} (Index: {active_idx})")
-                
-                is_dragging = True
-                drag_offset_x = active_stim.x - ndc_x
-                drag_offset_y = active_stim.y - ndc_y
-        
-        if mouse_left == glfw.RELEASE:
-            is_dragging = False
-            
-        if is_dragging:
-            active_stim.x = ndc_x + drag_offset_x
-            active_stim.y = ndc_y + drag_offset_y
+        # Left-button click + drag to move stimuli — Design mode only
+        if mode == 'free':
+            if mouse_left == glfw.PRESS and last_mouse_left == glfw.RELEASE:
+                # Check click hit for ALL stimuli
+                clicked_idx = -1
+                for i, s in enumerate(stimuli):
+                    half_size = s.current_size * 0.5
+                    if (s.x - half_size <= ndc_x <= s.x + half_size) and \
+                       (s.y - half_size <= ndc_y <= s.y + half_size):
+                        clicked_idx = i
+                        # Don't break immediately if we want z-order, but stimuli list order is drawing order (last on top)
+                        # So we should prob pick the last one that matches.
+                        # Let's just pick the first one found for simplicity or reverse iterate.
 
-        last_mouse_left = mouse_left
+                if clicked_idx != -1:
+                    active_idx = clicked_idx
+                    active_stim = stimuli[active_idx] # Update reference immediately
+                    print(f"选中刺激块: {type(active_stim).__name__} (Index: {active_idx})")
+
+                    is_dragging = True
+                    drag_offset_x = active_stim.x - ndc_x
+                    drag_offset_y = active_stim.y - ndc_y
+
+            if mouse_left == glfw.RELEASE:
+                is_dragging = False
+
+            if is_dragging:
+                active_stim.x = ndc_x + drag_offset_x
+                active_stim.y = ndc_y + drag_offset_y
+
+            last_mouse_left = mouse_left
 
         # Window Movement (Right Mouse Drag)
         mouse_right = glfw.get_mouse_button(window, glfw.MOUSE_BUTTON_RIGHT)
@@ -320,19 +362,17 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
             print("边框闪烁 (指令已接收)")
         last_b_state = b_state
 
-        # Save Layout (Ctrl + S)
-        s_key = glfw.get_key(window, glfw.KEY_S)
-        if s_key == glfw.PRESS and last_s_state == glfw.RELEASE:
-             if glfw.get_key(window, glfw.KEY_LEFT_SUPER) == glfw.PRESS or \
-                glfw.get_key(window, glfw.KEY_RIGHT_SUPER) == glfw.PRESS or \
-                glfw.get_key(window, glfw.KEY_LEFT_CONTROL) == glfw.PRESS or \
-                glfw.get_key(window, glfw.KEY_RIGHT_CONTROL) == glfw.PRESS:
-                 
-                 data = [s.to_dict() for s in stimuli]
-                 with open('layout.json', 'w') as f:
-                     json.dump(data, f, indent=4)
-                 print("\n布局已保存到 layout.json")
-        last_s_state = s_key
+        # Save Layout (Ctrl + S) — Design mode only
+        if mode == 'free':
+            s_key = glfw.get_key(window, glfw.KEY_S)
+            if s_key == glfw.PRESS and last_s_state == glfw.RELEASE:
+                 if glfw.get_key(window, glfw.KEY_LEFT_SUPER) == glfw.PRESS or \
+                    glfw.get_key(window, glfw.KEY_RIGHT_SUPER) == glfw.PRESS or \
+                    glfw.get_key(window, glfw.KEY_LEFT_CONTROL) == glfw.PRESS or \
+                    glfw.get_key(window, glfw.KEY_RIGHT_CONTROL) == glfw.PRESS:
+
+                     save_layout(window, stimuli)
+            last_s_state = s_key
 
 
         # Update Experiment Manager
@@ -352,6 +392,10 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
             if glfw.get_key(window, glfw.KEY_SPACE) == glfw.PRESS:
                 experiment_mgr.resume()
 
+        # Update Viewport inside loop to accommodate resizing or OS forced canvas clamps
+        fb_w, fb_h = glfw.get_framebuffer_size(window)
+        glViewport(0, 0, fb_w, fb_h)
+
         # Render
         glClear(GL_COLOR_BUFFER_BIT)
         
@@ -364,15 +408,30 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
         window_mgr.poll_events()
         frame_count += 1
 
+    if feedback_receiver is not None:
+        feedback_receiver.stop()
     window_mgr.terminate()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--width", type=int, default=800, help="Window width")
-    parser.add_argument("--height", type=int, default=600, help="Window height")
+    parser.add_argument("--width", type=int, default=2200, help="Window width")
+    parser.add_argument("--height", type=int, default=1200, help="Window height")
     parser.add_argument("--x", type=int, default=None, help="Window X position")
     parser.add_argument("--y", type=int, default=None, help="Window Y position")
     parser.add_argument("--port", type=str, default=None, help="Serial port for trigger")
-    parser.add_argument("--mode", type=str, default="free", choices=['free', 'offline', 'online_discrete', 'online_continuous'], help="Experiment Mode")
+    parser.add_argument("--mode", type=str, default=None, choices=['free', 'offline', 'online_discrete', 'online_continuous'], help="Experiment Mode")
     args = parser.parse_args()
-    main(width=args.width, height=args.height, xpos=args.x, ypos=args.y, serial_port=args.port, mode="offline")
+
+    if args.mode is not None:
+        # CLI explicitly specified mode: single run, no menu loop
+        print(f"Starting in mode: {args.mode}")
+        main(width=args.width, height=args.height, xpos=args.x, ypos=args.y, serial_port='COM9', mode=args.mode)
+    else:
+        # Menu loop: select_mode → main → select_mode → ...
+        while True:
+            selected_mode = select_mode()
+            if selected_mode is None:
+                # User cancelled the menu (ESC / window close) → exit program
+                break
+            print(f"Starting in mode: {selected_mode}")
+            main(width=args.width, height=args.height, xpos=args.x, ypos=args.y, serial_port='COM9', mode=selected_mode)

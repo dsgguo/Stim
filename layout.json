@@ -1,80 +1,62 @@
-[
-    {
-        "type": "Square",
-        "x": -0.826708984375,
-        "y": -0.6012760416666665,
-        "size": 0.3,
-        "color": [
-            0.0,
-            0.5,
-            1.0
-        ],
-        "flicker_freq": 8,
-        "flicker_phase": 0.0
+{
+    "window": {
+        "x": -115,
+        "y": 10,
+        "width": 2200,
+        "height": 1200
     },
-    {
-        "type": "Square",
-        "x": -0.8366015625000002,
-        "y": 0.5367057291666666,
-        "size": 0.3,
-        "color": [
-            0.1,
-            0.5,
-            0.9
-        ],
-        "flicker_freq": 2.8000000000000167,
-        "flicker_phase": 0.0
-    },
-    {
-        "type": "Square",
-        "x": 0.8239160156250002,
-        "y": -0.6128385416666668,
-        "size": 0.3,
-        "color": [
-            0.2,
-            0.5,
-            0.8
-        ],
-        "flicker_freq": 10,
-        "flicker_phase": 0.0
-    },
-    {
-        "type": "Square",
-        "x": 0.81255859375,
-        "y": 0.4709114583333336,
-        "size": 0.3,
-        "color": [
-            0.30000000000000004,
-            0.5,
-            0.7
-        ],
-        "flicker_freq": 11,
-        "flicker_phase": 0.0
-    },
-    {
-        "type": "Square",
-        "x": 0.026230468749999403,
-        "y": -0.6177734374999999,
-        "size": 0.3,
-        "color": [
-            0.4,
-            0.5,
-            0.6
-        ],
-        "flicker_freq": 12,
-        "flicker_phase": 0.0
-    },
-    {
-        "type": "Square",
-        "x": 0.008798828124999158,
-        "y": 0.4964973958333333,
-        "size": 0.3,
-        "color": [
-            0.5,
-            0.5,
-            0.5
-        ],
-        "flicker_freq": 13,
-        "flicker_phase": 0.0
-    }
-]
+    "stimuli": [
+        {
+            "type": "Square",
+            "x": -0.0027272727272729114,
+            "y": 0.6116666666666666,
+            "size": 0.18,
+            "color": [
+                1,
+                1,
+                1
+            ],
+            "flicker_freq": 8.0,
+            "flicker_phase": 0.0
+        },
+        {
+            "type": "Square",
+            "x": -0.7,
+            "y": 0.0,
+            "size": 0.18,
+            "color": [
+                1,
+                1,
+                1
+            ],
+            "flicker_freq": 9.0,
+            "flicker_phase": 1.5708
+        },
+        {
+            "type": "Square",
+            "x": 0.7,
+            "y": 0.0,
+            "size": 0.18,
+            "color": [
+                1,
+                1,
+                1
+            ],
+            "flicker_freq": 10.0,
+            "flicker_phase": 3.1416
+        },
+        {
+            "type": "Square",
+            "x": 0.0,
+            "y": -0.6,
+            "size": 0.18,
+            "color": [
+                1,
+                1,
+                1
+            ],
+            "flicker_freq": 11.0,
+            "flicker_phase": 4.7124
+        }
+    ]
+}

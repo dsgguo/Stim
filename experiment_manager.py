@@ -9,10 +9,12 @@ class ExperimentManager:
         2. 'offline': Cue (Red) -> Flicker (Tag=Target) -> Rest
         3. 'online_continuous': Continuous flicker -> Periodic Tags
     """
-    def __init__(self, mode, stimuli, trigger_manager=None):
+    def __init__(self, mode, stimuli, trigger_manager=None, feedback_receiver=None):
         self.mode = mode
         self.stimuli = stimuli
         self.trigger = trigger_manager
+        self.feedback_receiver = feedback_receiver
+        self.feedback_flash_duration = 0.4
         
         # State constants
         self.STATE_IDLE = 0
@@ -31,9 +33,9 @@ class ExperimentManager:
         # Timing Configuration (Seconds)
         self.t_rest = 1.0
         self.t_cue = 1.0
-        self.t_flicker = 2.0
+        self.t_flicker = 1.0
         self.t_feedback = 0.5
-        self.t_continuous_tag_interval = 2.0 
+        self.t_continuous_tag_interval = 1.3
         
         # Offline Sequence
         self.offline_sequence = []
@@ -172,10 +174,20 @@ class ExperimentManager:
         # Always flickering
         # Send periodic tags
         if current_time - self.last_tag_time > self.t_continuous_tag_interval:
-            print(f"[Continuous] Sending Tag 100")
+            print(f"[Continuous] Sending Tag 4")
             if self.trigger:
-                self.trigger.write_event(100)
+                self.trigger.write_event(4)
             self.last_tag_time = current_time
+
+            # Consume latest feedback label aligned with each tag period.
+            # Flicker keeps running; we only paint a green border on the chosen target.
+            if self.feedback_receiver is not None:
+                label = self.feedback_receiver.pop_latest_label()
+                if label is not None and 1 <= label <= len(self.stimuli):
+                    target = self.stimuli[label - 1]
+                    target.border_flash_duration = self.feedback_flash_duration
+                    target.trigger_border_flash(color=(0.0, 1.0, 0.0))
+                    print(f"[Continuous] Feedback label={label} -> stim[{label-1}]")
 
     def trigger_feedback(self, result_idx):
         """ Call this from main loop when classifier result is received """
