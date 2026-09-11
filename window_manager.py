@@ -2,13 +2,16 @@ import glfw
 import sys
 
 class WindowManager:
-    def __init__(self, width=800, height=600, title="Stimulus", fullscreen=False, xpos=None, ypos=None):
+    def __init__(self, width=800, height=600, title="Stimulus", fullscreen=False, xpos=None, ypos=None,
+                 floating=False):
         self.width = width
         self.height = height
         self.title = title
         self.fullscreen = fullscreen
         self.xpos = xpos
         self.ypos = ypos
+        # 置顶：刺激窗需要始终盖在 Webots 窗口之上时开启
+        self.floating = floating
         self.window = None
 
     def initialize(self):
@@ -28,13 +31,15 @@ class WindowManager:
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
         if sys.platform == 'darwin':
             glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, True) # Required on Mac
-        
+
         glfw.window_hint(glfw.DECORATED, glfw.FALSE)
-        
+
         # Transparency hint
         glfw.window_hint(glfw.TRANSPARENT_FRAMEBUFFER, glfw.TRUE)
         glfw.window_hint(glfw.ALPHA_BITS, 8) # 确保有Alpha通道来支持透明
         glfw.window_hint(glfw.RESIZABLE, glfw.TRUE)
+        if self.floating and not self.fullscreen:
+            glfw.window_hint(glfw.FLOATING, glfw.TRUE)  # always-on-top
 
         monitor = None
         if self.fullscreen:

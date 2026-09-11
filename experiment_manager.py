@@ -220,11 +220,11 @@ class ExperimentManager:
         # Block Randomization: Each round contains all stimuli once in random order
         self.offline_sequence = []
         ids = list(range(len(self.stimuli)))
-        
+
         for r in range(rounds):
             # Shuffle a copy of ids for this round
             r_ids = ids[:]
-            # random.shuffle(r_ids)
+            random.shuffle(r_ids)  # 块内随机化必须开启：固定顺序会让被试产生预期效应
             self.offline_sequence.extend(r_ids)
-            
+
         print(f"Generated Sequence ({rounds} rounds, {len(self.offline_sequence)} trials): {self.offline_sequence}")

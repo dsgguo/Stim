@@ -197,7 +197,10 @@ class Stimulus:
     @staticmethod
     def from_dict(data):
         class_name = data.get("type", "Square")
-        
+
+        # 白名单：layout.json 是外部输入，不允许它实例化任意类
+        if class_name not in ("Square", "Triangle", "Circle"):
+            return None
         cls = globals().get(class_name)
         if not cls:
             return None

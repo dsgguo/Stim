@@ -17,6 +17,9 @@ SEQ_ON_DURATION = 2.0
 SEQ_OFF_DURATION = 1.0
 SEQ_TOTAL_ROUNDS = 3
 
+# layout.json 锚定到脚本目录，避免受运行时工作目录影响
+LAYOUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout.json')
+
 
 def save_layout(window, stimuli):
     wx, wy = glfw.get_window_pos(window)
@@ -25,35 +28,63 @@ def save_layout(window, stimuli):
         "window": {"x": wx, "y": wy, "width": ww, "height": wh},
         "stimuli": [s.to_dict() for s in stimuli],
     }
-    with open('layout.json', 'w') as f:
+    with open(LAYOUT_PATH, 'w') as f:
         json.dump(data, f, indent=4)
-    print("布局已保存到 layout.json")
+    print(f"布局已保存到 {LAYOUT_PATH}")
 
-def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='free'):
-    # 先读取布局，以支持覆盖窗口的尺寸与位置
+
+def load_layout(width=800, height=600, xpos=None, ypos=None):
+    """返回 (width, height, xpos, ypos, stimuli)，以入参为缺省值。文件缺失/损坏时回退默认布局。"""
     stimuli = []
-    if os.path.exists('layout.json'):
-        print("加载布局文件 layout.json...")
+    if os.path.exists(LAYOUT_PATH):
+        print(f"加载布局文件 {LAYOUT_PATH}...")
         try:
-            with open('layout.json', 'r') as f:
+            with open(LAYOUT_PATH, 'r') as f:
                 data = json.load(f)
-                if isinstance(data, dict):
-                    win_cfg = data.get("window", {})
-                    width = win_cfg.get("width", width)
-                    height = win_cfg.get("height", height)
-                    xpos = win_cfg.get("x", xpos)
-                    ypos = win_cfg.get("y", ypos)
-                    for d in data.get("stimuli", []):
-                        s = Stimulus.from_dict(d)
-                        if s: stimuli.append(s)
-                elif isinstance(data, list):
-                    for d in data:
-                        s = Stimulus.from_dict(d)
-                        if s: stimuli.append(s)
+            if isinstance(data, dict):
+                win_cfg = data.get("window", {})
+                width = win_cfg.get("width", width)
+                height = win_cfg.get("height", height)
+                xpos = win_cfg.get("x", xpos)
+                ypos = win_cfg.get("y", ypos)
+                for d in data.get("stimuli", []):
+                    s = Stimulus.from_dict(d)
+                    if s: stimuli.append(s)
+            elif isinstance(data, list):
+                for d in data:
+                    s = Stimulus.from_dict(d)
+                    if s: stimuli.append(s)
         except Exception as e:
             print(f"Failed to load layout: {e}")
+    return width, height, xpos, ypos, stimuli
 
-    window_mgr = WindowManager(width=width, height=height, title="Stimulus Window", fullscreen=False, xpos=xpos, ypos=ypos)
+
+def get_refresh_rate_for_window(window, fallback=60.0):
+    """取窗口中心所在显示器的刷新率，避免多屏时频率系统性偏移。"""
+    try:
+        wx, wy = glfw.get_window_pos(window)
+        ww, wh = glfw.get_window_size(window)
+        cx, cy = wx + ww // 2, wy + wh // 2
+        for monitor in glfw.get_monitors():
+            mx, my = glfw.get_monitor_pos(monitor)
+            mode = glfw.get_video_mode(monitor)
+            if mx <= cx < mx + mode.size.width and my <= cy < my + mode.size.height:
+                return float(mode.refresh_rate) or fallback
+        primary = glfw.get_primary_monitor()
+        if primary is not None:
+            return float(glfw.get_video_mode(primary).refresh_rate) or fallback
+    except Exception:
+        pass
+    return fallback
+
+
+def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='free',
+         feedback_port=5006, topmost=True):
+    # 先读取布局，以支持覆盖窗口的尺寸与位置
+    width, height, xpos, ypos, stimuli = load_layout(width, height, xpos, ypos)
+
+    window_mgr = WindowManager(width=width, height=height, title="Stimulus Window", fullscreen=False,
+                               xpos=xpos, ypos=ypos, floating=topmost and mode != 'free')
     if not window_mgr.initialize():
         print("Failed to initialize window")
         return
@@ -83,7 +114,7 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
             color = 0.1 * i, 0.5, 1.0 - 0.1 * i
             s = Square(x=x_pos, y=y_pos, size=0.3, color=color)
             stimuli.append(s)
-        
+
     active_idx = 0 if stimuli else -1
 
     for s in stimuli:
@@ -95,19 +126,25 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
     feedback_receiver = None
     if mode != 'free':
         if mode == 'online_continuous':
-            feedback_receiver = FeedbackReceiver(ip='0.0.0.0', port=5006)
-            feedback_receiver.start()
+            try:
+                feedback_receiver = FeedbackReceiver(ip='0.0.0.0', port=feedback_port)
+                feedback_receiver.start()
+            except OSError as e:
+                print(f"⚠️ 反馈端口 {feedback_port} 绑定失败（可能被上个实例占用），本次无闭环反馈: {e}")
+                feedback_receiver = None
         experiment_mgr = ExperimentManager(mode, stimuli, trigger, feedback_receiver)
         experiment_mgr.start()
-    
+
     # Transparency settings
     is_bg_transparent = True
     glClearColor(0.0, 0.0, 0.0, 0.0)
     glEnable(GL_BLEND)
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    # RGB 走标准 alpha 混合，alpha 通道原值写回（否则 framebuffer alpha 变成 a^2，
+    # 透明窗口按 premultiplied 合成时会给闪烁波形叠加 2f 谐波）
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
 
     # Frame-based timing setup
-    refresh_rate = glfw.get_video_mode(glfw.get_primary_monitor()).refresh_rate
+    refresh_rate = get_refresh_rate_for_window(window_mgr.window, fallback=60.0)
     if refresh_rate < 1: refresh_rate = 60.0 # Fallback
     frame_count = 0
     print(f"检测到刷新率: {refresh_rate} Hz")
@@ -118,6 +155,7 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
     last_tab_state = glfw.RELEASE
     last_s_state = glfw.RELEASE # For Ctrl+S
     last_g_state = glfw.RELEASE # For Background Toggle
+    last_t_state = glfw.RELEASE # For Timed/Sequenced Flicker (edge detection)
 
     print("控制说明:")
     if mode == 'free':
@@ -285,14 +323,31 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
                     print("闪烁已开始 (持续)")
         last_f_state = f_state
 
-        # Timed Flicker (Test duration of 2.0s)
-        if glfw.get_key(window, glfw.KEY_T) == glfw.PRESS:
-             if glfw.get_key(window, glfw.KEY_LEFT_SHIFT) != glfw.PRESS and \
-                glfw.get_key(window, glfw.KEY_RIGHT_SHIFT) != glfw.PRESS:
-                 active_stim.set_flicker(freq=active_stim.flicker_freq, duration=2.0, current_frame=frame_count)
-                 if trigger:
-                     trigger.write_event(active_idx + 1)
-                 print("闪烁已开始 (2.0秒)")
+        # Timed Flicker (Test duration of 2.0s) & Sequenced Flicker — 按下沿触发一次
+        t_state = glfw.get_key(window, glfw.KEY_T)
+        t_pressed = (t_state == glfw.PRESS and last_t_state == glfw.RELEASE)
+        shift_pressed = glfw.get_key(window, glfw.KEY_LEFT_SHIFT) == glfw.PRESS or \
+                        glfw.get_key(window, glfw.KEY_RIGHT_SHIFT) == glfw.PRESS
+        if t_pressed:
+            if not shift_pressed:
+                active_stim.set_flicker(freq=active_stim.flicker_freq, duration=2.0, current_frame=frame_count)
+                if trigger:
+                    trigger.write_event(active_idx + 1)
+                print("闪烁已开始 (2.0秒)")
+            else:
+                if not is_sequencing:
+                    is_sequencing = True
+                    seq_round = 0
+                    seq_phase = 0 # ON
+                    seq_start_time = time.time()
+                    # Start All
+                    for s in stimuli:
+                        s.set_flicker(freq=s.flicker_freq, current_frame=frame_count)
+                    if trigger:
+                        # Event ID for global/sequence: 100
+                        trigger.write_event(100)
+                    print("序列闪烁开始: 第 1 轮 (ON)")
+        last_t_state = t_state
 
         # Background Toggle (G Key)
         g_state = glfw.get_key(window, glfw.KEY_G)
@@ -306,24 +361,6 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
                 print("背景: 黑色")
         last_g_state = g_state
 
-        # Sequenced Flicker (Shift + T)
-        t_key = glfw.get_key(window, glfw.KEY_T)
-        if t_key == glfw.PRESS:
-             if glfw.get_key(window, glfw.KEY_LEFT_SHIFT) == glfw.PRESS or \
-                glfw.get_key(window, glfw.KEY_RIGHT_SHIFT) == glfw.PRESS:
-                 if not is_sequencing:
-                     is_sequencing = True
-                     seq_round = 0
-                     seq_phase = 0 # ON
-                     seq_start_time = time.time()
-                     # Start All
-                     for s in stimuli:
-                         s.set_flicker(freq=s.flicker_freq, current_frame=frame_count)
-                     if trigger:
-                         # Event ID for global/sequence: 100
-                         trigger.write_event(100)
-                     print("序列闪烁开始: 第 1 轮 (ON)")
-        
         # Sequence Update Loop
         if is_sequencing:
             current_time = time.time()
@@ -410,6 +447,10 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
 
     if feedback_receiver is not None:
         feedback_receiver.stop()
+    if trigger is not None:
+        # 必须显式关闭串口：Windows 独占打开，不关闭会导致菜单循环
+        # 第二次进实验时 SerialTrigger 打开失败而静默失效
+        trigger.close()
     window_mgr.terminate()
 
 if __name__ == "__main__":
@@ -418,14 +459,20 @@ if __name__ == "__main__":
     parser.add_argument("--height", type=int, default=1200, help="Window height")
     parser.add_argument("--x", type=int, default=None, help="Window X position")
     parser.add_argument("--y", type=int, default=None, help="Window Y position")
-    parser.add_argument("--port", type=str, default=None, help="Serial port for trigger")
+    parser.add_argument("--port", type=str, default='COM9', help="Serial port for trigger (设为 none 可禁用串口)")
+    parser.add_argument("--feedback-port", type=int, default=5006, help="UDP port for robot feedback (default 5006)")
+    parser.add_argument("--no-topmost", action='store_true', help="实验模式下不置顶窗口")
     parser.add_argument("--mode", type=str, default=None, choices=['free', 'offline', 'online_discrete', 'online_continuous'], help="Experiment Mode")
     args = parser.parse_args()
+
+    serial_port = None if args.port.strip().lower() in ('none', 'off', '') else args.port
 
     if args.mode is not None:
         # CLI explicitly specified mode: single run, no menu loop
         print(f"Starting in mode: {args.mode}")
-        main(width=args.width, height=args.height, xpos=args.x, ypos=args.y, serial_port='COM9', mode=args.mode)
+        main(width=args.width, height=args.height, xpos=args.x, ypos=args.y,
+             serial_port=serial_port, mode=args.mode,
+             feedback_port=args.feedback_port, topmost=not args.no_topmost)
     else:
         # Menu loop: select_mode → main → select_mode → ...
         while True:
@@ -434,4 +481,6 @@ if __name__ == "__main__":
                 # User cancelled the menu (ESC / window close) → exit program
                 break
             print(f"Starting in mode: {selected_mode}")
-            main(width=args.width, height=args.height, xpos=args.x, ypos=args.y, serial_port='COM9', mode=selected_mode)
+            main(width=args.width, height=args.height, xpos=args.x, ypos=args.y,
+                 serial_port=serial_port, mode=selected_mode,
+                 feedback_port=args.feedback_port, topmost=not args.no_topmost)
