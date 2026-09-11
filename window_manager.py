@@ -3,7 +3,7 @@ import sys
 
 class WindowManager:
     def __init__(self, width=800, height=600, title="Stimulus", fullscreen=False, xpos=None, ypos=None,
-                 floating=False):
+                 floating=False, mouse_passthrough=False):
         self.width = width
         self.height = height
         self.title = title
@@ -12,6 +12,7 @@ class WindowManager:
         self.ypos = ypos
         # 置顶：刺激窗需要始终盖在 Webots 窗口之上时开启
         self.floating = floating
+        self.mouse_passthrough = mouse_passthrough
         self.window = None
 
     def initialize(self):
@@ -53,6 +54,18 @@ class WindowManager:
         if not self.window:
             glfw.terminate()
             return False
+
+        if self.mouse_passthrough:
+            attribute = getattr(glfw, 'MOUSE_PASSTHROUGH', None)
+            if (attribute is None or not hasattr(glfw, 'set_window_attrib')
+                    or not hasattr(glfw, 'get_window_attrib')
+                    or glfw.get_version() < (3, 4, 0)):
+                raise RuntimeError('Stim mouse passthrough requires GLFW 3.4 or later')
+            # Only this undecorated Stim window is affected; keyboard handling is retained.
+            glfw.set_window_attrib(self.window, attribute, glfw.TRUE)
+            if glfw.get_window_attrib(self.window, attribute) != glfw.TRUE:
+                raise RuntimeError('GLFW could not enable mouse passthrough for the Stim window')
+            print('Stim mouse passthrough enabled.', flush=True)
 
         if self.xpos is not None and self.ypos is not None:
             glfw.set_window_pos(self.window, self.xpos, self.ypos)
