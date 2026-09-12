@@ -9,7 +9,13 @@ class ExperimentManager:
         2. 'offline': Cue (Red) -> Flicker (Tag=Target) -> Rest
         3. 'online_continuous': Continuous flicker -> Periodic Tags
     """
-    def __init__(self, mode, stimuli, trigger_manager=None, feedback_receiver=None):
+    def __init__(self, mode, stimuli, trigger_manager=None, feedback_receiver=None,
+                 flicker_duration=1.0, rest_interval=1.0, continuous_interval=1.3,
+                 offline_rounds=5):
+        if flicker_duration <= 0 or rest_interval <= 0 or continuous_interval <= 0:
+            raise ValueError('Stim 时长与间隔参数必须大于 0 秒')
+        if offline_rounds < 1:
+            raise ValueError('离线采集轮数必须至少为 1')
         self.mode = mode
         self.stimuli = stimuli
         self.trigger = trigger_manager
@@ -31,16 +37,16 @@ class ExperimentManager:
         self.target_idx = -1
         
         # Timing Configuration (Seconds)
-        self.t_rest = 1.0
+        self.t_rest = float(rest_interval)
         self.t_cue = 1.0
-        self.t_flicker = 1.0
+        self.t_flicker = float(flicker_duration)
         self.t_feedback = 0.5
-        self.t_continuous_tag_interval = 1.3
-        
+        self.t_continuous_tag_interval = float(continuous_interval)
+
         # Offline Sequence
         self.offline_sequence = []
         self.current_trial_idx = 0
-        self.TOTAL_OFFLINE_ROUNDS = 5 # Default, can be tailored
+        self.TOTAL_OFFLINE_ROUNDS = int(offline_rounds)
 
         # Continuous State
         self.last_tag_time = 0

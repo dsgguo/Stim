@@ -78,9 +78,28 @@ def get_refresh_rate_for_window(window, fallback=60.0):
     return fallback
 
 
+def resolve_timing(flicker_duration=None, rest_interval=None, continuous_interval=None,
+                   offline_rounds=None):
+    """把可空的时序覆盖合并为 ExperimentManager 参数；缺省沿用内置默认。"""
+    values = {
+        'flicker_duration': 1.0 if flicker_duration is None else float(flicker_duration),
+        'rest_interval': 1.0 if rest_interval is None else float(rest_interval),
+        'continuous_interval': 1.3 if continuous_interval is None else float(continuous_interval),
+        'offline_rounds': 5 if offline_rounds is None else int(offline_rounds),
+    }
+    for name in ('flicker_duration', 'rest_interval', 'continuous_interval'):
+        if not values[name] > 0:
+            raise ValueError(f'Stim 时序参数 {name} 必须大于 0 秒')
+    if values['offline_rounds'] < 1:
+        raise ValueError('离线采集轮数必须至少为 1')
+    return values
+
+
 def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='free',
          feedback_port=5006, topmost=True, auto_start=False, exit_on_complete=False,
-         stop_file=None, mouse_passthrough=False, viewport_file=None):
+         stop_file=None, mouse_passthrough=False, viewport_file=None,
+         flicker_duration=None, rest_interval=None, continuous_interval=None,
+         offline_rounds=None):
     stop_file = os.path.abspath(stop_file) if stop_file else None
     if stop_file and os.path.isfile(stop_file):
         print("Stim start cancelled by manager.", flush=True)
@@ -149,7 +168,9 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
                 except OSError as e:
                     print(f"⚠️ 反馈端口 {feedback_port} 绑定失败（可能被上个实例占用），本次无闭环反馈: {e}")
                     feedback_receiver = None
-            experiment_mgr = ExperimentManager(mode, stimuli, trigger, feedback_receiver)
+            timing = resolve_timing(flicker_duration, rest_interval,
+                                    continuous_interval, offline_rounds)
+            experiment_mgr = ExperimentManager(mode, stimuli, trigger, feedback_receiver, **timing)
             experiment_mgr.start()
 
         # Transparency settings
@@ -525,10 +546,22 @@ if __name__ == "__main__":
     parser.add_argument("--exit-on-complete", action='store_true', help="离线刺激完成后自动退出")
     parser.add_argument("--stop-file", help="检测到此文件时停止并释放串口、UDP 和窗口资源")
     parser.add_argument("--viewport-file", help="托管摄像头画面矩形 JSON，保持透明并对齐四向刺激")
+    parser.add_argument("--flicker-duration", type=float, default=None,
+                        help="单次刺激闪烁时长秒（offline / online_discrete，默认 1.0）")
+    parser.add_argument("--rest-interval", type=float, default=None,
+                        help="试次之间休息时长秒（默认 1.0）")
+    parser.add_argument("--continuous-interval", type=float, default=None,
+                        help="在线连续模式发送标签与取反馈的间隔秒（默认 1.3）")
+    parser.add_argument("--offline-rounds", type=int, default=None,
+                        help="离线采集轮数，每轮 4 个目标（默认 5）")
     parser.add_argument("--mode", type=str, default=None, choices=['free', 'offline', 'online_discrete', 'online_continuous'], help="Experiment Mode")
     args = parser.parse_args()
 
     serial_port = None if args.port.strip().lower() in ('none', 'off', '') else args.port
+    timing_overrides = dict(flicker_duration=args.flicker_duration,
+                            rest_interval=args.rest_interval,
+                            continuous_interval=args.continuous_interval,
+                            offline_rounds=args.offline_rounds)
 
     if args.mode is not None:
         # CLI explicitly specified mode: single run, no menu loop
@@ -537,7 +570,8 @@ if __name__ == "__main__":
              serial_port=serial_port, mode=args.mode,
              feedback_port=args.feedback_port, topmost=not args.no_topmost,
              auto_start=args.auto_start, exit_on_complete=args.exit_on_complete,
-             stop_file=args.stop_file, mouse_passthrough=args.mouse_passthrough, viewport_file=args.viewport_file)
+             stop_file=args.stop_file, mouse_passthrough=args.mouse_passthrough, viewport_file=args.viewport_file,
+             **timing_overrides)
     else:
         # Menu loop: select_mode → main → select_mode → ...
         while True:
@@ -552,4 +586,5 @@ if __name__ == "__main__":
                  serial_port=serial_port, mode=selected_mode,
                  feedback_port=args.feedback_port, topmost=not args.no_topmost,
                  auto_start=args.auto_start, exit_on_complete=args.exit_on_complete,
-                 stop_file=args.stop_file, mouse_passthrough=args.mouse_passthrough, viewport_file=args.viewport_file)
+                 stop_file=args.stop_file, mouse_passthrough=args.mouse_passthrough, viewport_file=args.viewport_file,
+                 **timing_overrides)
