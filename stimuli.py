@@ -122,8 +122,9 @@ class Stimulus:
         mat = np.identity(4, dtype=np.float32)
         # Scale
         s = self.current_size * scale_mult
-        mat[0, 0] = s
-        mat[1, 1] = s
+        viewport_scale = getattr(self, 'viewport_scale', None)
+        mat[0, 0] = viewport_scale[0] * scale_mult if viewport_scale else s
+        mat[1, 1] = viewport_scale[1] * scale_mult if viewport_scale else s
         mat[2, 2] = s
         # Translate
         mat[0, 3] = self.x
@@ -139,6 +140,8 @@ class Stimulus:
         glUseProgram(self.shader)
         
         alpha, current_time = self.update_alpha(current_frame, refresh_rate)
+        viewport_target = getattr(self, 'viewport_scale', None) is not None
+        main_scale = 1.0
         
         # 1. Draw Selection Highlight (Active state)
         if active:
@@ -159,7 +162,9 @@ class Stimulus:
             if current_time - self.border_flash_start_time > self.border_flash_duration:
                 self.is_flashing_border = False
             else:
-                model = self.get_model_matrix(scale_mult=1.2)
+                model = self.get_model_matrix(scale_mult=1.0 if viewport_target else 1.2)
+                if viewport_target:
+                    main_scale = 0.84  # Keep cue/feedback borders within the native target region.
                 model_loc = glGetUniformLocation(self.shader, "model")
                 glUniformMatrix4fv(model_loc, 1, GL_TRUE, model)
                 
@@ -170,12 +175,17 @@ class Stimulus:
                 glDrawArrays(GL_TRIANGLE_FAN, 0, self.num_vertices)
 
         # 3. Draw Main Shape
-        model = self.get_model_matrix()
+        model = self.get_model_matrix(scale_mult=main_scale)
         model_loc = glGetUniformLocation(self.shader, "model")
         glUniformMatrix4fv(model_loc, 1, GL_TRUE, model)
         
         color_loc = glGetUniformLocation(self.shader, "color")
-        glUniform4f(color_loc, self.color[0], self.color[1], self.color[2], alpha)
+        if viewport_target:
+            # Modulate luminance, keeping each target opaque at its dark phase.
+            # The native window region makes everything outside the targets transparent.
+            glUniform4f(color_loc, self.color[0] * alpha, self.color[1] * alpha, self.color[2] * alpha, 1.0)
+        else:
+            glUniform4f(color_loc, self.color[0], self.color[1], self.color[2], alpha)
         
         glBindVertexArray(self.vao)
         glDrawArrays(GL_TRIANGLE_FAN, 0, self.num_vertices)

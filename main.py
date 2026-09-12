@@ -80,17 +80,30 @@ def get_refresh_rate_for_window(window, fallback=60.0):
 
 def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='free',
          feedback_port=5006, topmost=True, auto_start=False, exit_on_complete=False,
-         stop_file=None, mouse_passthrough=False):
+         stop_file=None, mouse_passthrough=False, viewport_file=None):
     stop_file = os.path.abspath(stop_file) if stop_file else None
     if stop_file and os.path.isfile(stop_file):
         print("Stim start cancelled by manager.", flush=True)
         return
     # 先读取布局，以支持覆盖窗口的尺寸与位置
     width, height, xpos, ypos, stimuli = load_layout(width, height, xpos, ypos)
+    viewport = None
+    viewport_layout = None
+    if viewport_file:
+        from viewport_layout import load_viewport, apply_targets
+        viewport_file = os.path.abspath(viewport_file)
+        viewport = load_viewport(viewport_file)
+        if not viewport.get('visible', True):
+            raise RuntimeError('Camera viewport is not visible')
+        viewport_layout = apply_targets(stimuli, viewport)
+        rect = viewport_layout['rect']
+        xpos, ypos, width, height = rect['x'], rect['y'], rect['width'], rect['height']
+    interactive = mode == 'free' and viewport is None
 
     window_mgr = WindowManager(width=width, height=height, title="Stimulus Window", fullscreen=False,
-                               xpos=xpos, ypos=ypos, floating=topmost and mode != 'free',
-                               mouse_passthrough=mouse_passthrough)
+                               xpos=xpos, ypos=ypos, floating=topmost and (mode != 'free' or viewport is not None),
+                               mouse_passthrough=mouse_passthrough,
+                               visible_regions=viewport_layout['regions'] if viewport_layout else None)
     trigger = None
     feedback_receiver = None
     try:
@@ -151,6 +164,8 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
         refresh_rate = get_refresh_rate_for_window(window_mgr.window, fallback=60.0)
         if refresh_rate < 1: refresh_rate = 60.0 # Fallback
         frame_count = 0
+        viewport_checked = time.monotonic() if viewport is not None else 0
+        viewport_valid = viewport_checked
         print(f"检测到刷新率: {refresh_rate} Hz")
         if auto_start and experiment_mgr is not None:
             experiment_mgr.resume()
@@ -165,7 +180,12 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
         last_t_state = glfw.RELEASE # For Timed/Sequenced Flicker (edge detection)
 
         print("控制说明:")
-        if mode == 'free':
+        if viewport is not None:
+            print("  四个刺激方块位于摄像头窗口外侧；画面和标题栏保持无遮挡。")
+            if experiment_mgr is not None:
+                print("  SPACE: 开始/继续实验")
+            print("  ESC: 退出刺激窗口；也可在管理器停止本次运行")
+        elif interactive:
             print("  TAB: 切换刺激块形状")
             print("  ARROW KEYS: 移动刺激块")
             print("  Mouse Drag: 拖拽刺激块")
@@ -211,10 +231,29 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
             if stop_file and os.path.isfile(stop_file):
                 print("Stim stop requested by manager.", flush=True)
                 break
+            if viewport is not None and time.monotonic() - viewport_checked >= 0.1:
+                viewport_checked = time.monotonic()
+                try:
+                    updated = load_viewport(viewport_file)
+                except (OSError, ValueError, KeyError, TypeError):
+                    if viewport_checked - viewport_valid > 2:
+                        raise RuntimeError('Camera viewport updates are unavailable')
+                else:
+                    viewport_valid = viewport_checked
+                    if not updated.get('visible', True):
+                        print('Camera view closed or hidden; stopping stimulus.', flush=True)
+                        break
+                    if updated != viewport:
+                        viewport_layout = apply_targets(stimuli, updated)
+                        window_mgr.set_bounds(viewport_layout['rect'], viewport_layout['regions'])
+                        viewport = updated
+                        current_refresh = get_refresh_rate_for_window(window_mgr.window, fallback=refresh_rate)
+                        if abs(current_refresh - refresh_rate) > 0.5:
+                            raise RuntimeError('Display refresh rate changed; restart this experiment on the new display')
             # Input Handling
             window = window_mgr.window
             if glfw.get_key(window, glfw.KEY_ESCAPE) == glfw.PRESS:
-                if mode == 'free':
+                if interactive:
                     save_layout(window, stimuli)
                 glfw.set_window_should_close(window, True)
 
@@ -228,7 +267,7 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
             active_stim = stimuli[active_idx]
 
             # Movement (Arrow Keys) — Design mode only
-            if mode == 'free':
+            if interactive:
                 move_speed = 0.01
                 if glfw.get_key(window, glfw.KEY_UP) == glfw.PRESS:
                     active_stim.y += move_speed
@@ -251,7 +290,7 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
             ndc_y = 1 - (my / win_h) * 2
 
             # Left-button click + drag to move stimuli — Design mode only
-            if mode == 'free':
+            if interactive:
                 if mouse_left == glfw.PRESS and last_mouse_left == glfw.RELEASE:
                     # Check click hit for ALL stimuli
                     clicked_idx = -1
@@ -284,7 +323,7 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
 
             # Window Movement (Right Mouse Drag)
             mouse_right = glfw.get_mouse_button(window, glfw.MOUSE_BUTTON_RIGHT)
-            if mouse_right == glfw.PRESS and last_mouse_right == glfw.RELEASE:
+            if viewport is None and mouse_right == glfw.PRESS and last_mouse_right == glfw.RELEASE:
                  is_win_dragging = True
                  # Record initial click pos
                  win_drag_start_x, win_drag_start_y = glfw.get_cursor_pos(window)
@@ -307,7 +346,7 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
 
             # Flicker Control
             f_state = glfw.get_key(window, glfw.KEY_F)
-            if f_state == glfw.PRESS and last_f_state == glfw.RELEASE:
+            if viewport is None and f_state == glfw.PRESS and last_f_state == glfw.RELEASE:
                 # Check modifier for Global Flicker
                 if glfw.get_key(window, glfw.KEY_LEFT_SHIFT) == glfw.PRESS or \
                    glfw.get_key(window, glfw.KEY_RIGHT_SHIFT) == glfw.PRESS:
@@ -336,7 +375,7 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
 
             # Timed Flicker (Test duration of 2.0s) & Sequenced Flicker — 按下沿触发一次
             t_state = glfw.get_key(window, glfw.KEY_T)
-            t_pressed = (t_state == glfw.PRESS and last_t_state == glfw.RELEASE)
+            t_pressed = viewport is None and (t_state == glfw.PRESS and last_t_state == glfw.RELEASE)
             shift_pressed = glfw.get_key(window, glfw.KEY_LEFT_SHIFT) == glfw.PRESS or \
                             glfw.get_key(window, glfw.KEY_RIGHT_SHIFT) == glfw.PRESS
             if t_pressed:
@@ -362,7 +401,7 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
 
             # Background Toggle (G Key)
             g_state = glfw.get_key(window, glfw.KEY_G)
-            if g_state == glfw.PRESS and last_g_state == glfw.RELEASE:
+            if viewport is None and g_state == glfw.PRESS and last_g_state == glfw.RELEASE:
                 is_bg_transparent = not is_bg_transparent
                 if is_bg_transparent:
                     glClearColor(0.0, 0.0, 0.0, 0.0)
@@ -405,13 +444,13 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
 
             # Border Flash
             b_state = glfw.get_key(window, glfw.KEY_B)
-            if b_state == glfw.PRESS and last_b_state == glfw.RELEASE:
+            if viewport is None and b_state == glfw.PRESS and last_b_state == glfw.RELEASE:
                 active_stim.trigger_border_flash()
                 print("边框闪烁 (指令已接收)")
             last_b_state = b_state
 
             # Save Layout (Ctrl + S) — Design mode only
-            if mode == 'free':
+            if interactive:
                 s_key = glfw.get_key(window, glfw.KEY_S)
                 if s_key == glfw.PRESS and last_s_state == glfw.RELEASE:
                      if glfw.get_key(window, glfw.KEY_LEFT_SUPER) == glfw.PRESS or \
@@ -453,7 +492,7 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
         
             for i, s in enumerate(stimuli):
                 # Pass active state to highlight the selected one
-                is_active = (i == active_idx)
+                is_active = (i == active_idx) and viewport is None
                 s.draw(current_frame=frame_count, refresh_rate=refresh_rate, active=is_active)
 
             window_mgr.swap_buffers()
@@ -485,6 +524,7 @@ if __name__ == "__main__":
     parser.add_argument("--auto-start", action='store_true', help="窗口就绪后自动开始实验，无需按空格")
     parser.add_argument("--exit-on-complete", action='store_true', help="离线刺激完成后自动退出")
     parser.add_argument("--stop-file", help="检测到此文件时停止并释放串口、UDP 和窗口资源")
+    parser.add_argument("--viewport-file", help="托管摄像头画面矩形 JSON，保持透明并对齐四向刺激")
     parser.add_argument("--mode", type=str, default=None, choices=['free', 'offline', 'online_discrete', 'online_continuous'], help="Experiment Mode")
     args = parser.parse_args()
 
@@ -497,7 +537,7 @@ if __name__ == "__main__":
              serial_port=serial_port, mode=args.mode,
              feedback_port=args.feedback_port, topmost=not args.no_topmost,
              auto_start=args.auto_start, exit_on_complete=args.exit_on_complete,
-             stop_file=args.stop_file, mouse_passthrough=args.mouse_passthrough)
+             stop_file=args.stop_file, mouse_passthrough=args.mouse_passthrough, viewport_file=args.viewport_file)
     else:
         # Menu loop: select_mode → main → select_mode → ...
         while True:
@@ -512,4 +552,4 @@ if __name__ == "__main__":
                  serial_port=serial_port, mode=selected_mode,
                  feedback_port=args.feedback_port, topmost=not args.no_topmost,
                  auto_start=args.auto_start, exit_on_complete=args.exit_on_complete,
-                 stop_file=args.stop_file, mouse_passthrough=args.mouse_passthrough)
+                 stop_file=args.stop_file, mouse_passthrough=args.mouse_passthrough, viewport_file=args.viewport_file)

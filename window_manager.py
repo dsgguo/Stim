@@ -3,7 +3,7 @@ import sys
 
 class WindowManager:
     def __init__(self, width=800, height=600, title="Stimulus", fullscreen=False, xpos=None, ypos=None,
-                 floating=False, mouse_passthrough=False):
+                 floating=False, mouse_passthrough=False, visible_regions=None):
         self.width = width
         self.height = height
         self.title = title
@@ -13,15 +13,19 @@ class WindowManager:
         # 置顶：刺激窗需要始终盖在 Webots 窗口之上时开启
         self.floating = floating
         self.mouse_passthrough = mouse_passthrough
+        self.visible_regions = visible_regions
         self.window = None
 
     def initialize(self):
         import ctypes
         try:
-            # 开启高DPI感知，防止Windows因为缩放导致窗口变黑/透明度失效以及大小错位
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            # Match the camera client rectangle in physical screen pixels.
+            ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
         except Exception:
-            pass
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)
+            except Exception:
+                pass
 
         if not glfw.init():
             return False
@@ -39,6 +43,8 @@ class WindowManager:
         glfw.window_hint(glfw.TRANSPARENT_FRAMEBUFFER, glfw.TRUE)
         glfw.window_hint(glfw.ALPHA_BITS, 8) # 确保有Alpha通道来支持透明
         glfw.window_hint(glfw.RESIZABLE, glfw.TRUE)
+        if self.visible_regions is not None:
+            glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
         if self.floating and not self.fullscreen:
             glfw.window_hint(glfw.FLOATING, glfw.TRUE)  # always-on-top
 
@@ -54,6 +60,9 @@ class WindowManager:
         if not self.window:
             glfw.terminate()
             return False
+
+        if self.visible_regions is not None:
+            self.set_visible_regions(self.visible_regions)
 
         if self.mouse_passthrough:
             attribute = getattr(glfw, 'MOUSE_PASSTHROUGH', None)
@@ -72,6 +81,8 @@ class WindowManager:
 
         glfw.make_context_current(self.window)
         glfw.swap_interval(1) # Enable V-Sync
+        if self.visible_regions is not None:
+            glfw.show_window(self.window)
         return True
 
     def should_close(self):
@@ -88,3 +99,55 @@ class WindowManager:
 
     def get_window_size(self):
         return glfw.get_window_size(self.window)
+
+    def set_bounds(self, rect, visible_regions=None):
+        resizing = (rect['width'], rect['height']) != (self.width, self.height)
+        if resizing and visible_regions is not None:
+            glfw.hide_window(self.window)
+        glfw.set_window_pos(self.window, rect['x'], rect['y'])
+        glfw.set_window_size(self.window, rect['width'], rect['height'])
+        self.xpos, self.ypos = rect['x'], rect['y']
+        self.width, self.height = rect['width'], rect['height']
+        if visible_regions is not None:
+            self.set_visible_regions(visible_regions)
+        if resizing and visible_regions is not None:
+            glfw.show_window(self.window)
+
+    def set_visible_regions(self, rectangles):
+        """Remove all non-target pixels from the native window, including the video.
+
+        Some Windows OpenGL drivers report a transparent framebuffer but still
+        display its background as black. A native window region leaves actual
+        holes and preserves GLFW rendering/vsync and mouse passthrough.
+        """
+        if sys.platform != 'win32':
+            raise RuntimeError('Camera target regions currently require Windows')
+        import ctypes
+        from ctypes import wintypes
+        user = ctypes.WinDLL('user32', use_last_error=True)
+        gdi = ctypes.WinDLL('gdi32', use_last_error=True)
+        gdi.CreateRectRgn.argtypes = [ctypes.c_int] * 4
+        gdi.CreateRectRgn.restype = wintypes.HRGN
+        gdi.CombineRgn.argtypes = [wintypes.HRGN, wintypes.HRGN, wintypes.HRGN, ctypes.c_int]
+        gdi.DeleteObject.argtypes = [wintypes.HGDIOBJ]
+        user.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HRGN, wintypes.BOOL]
+        combined = gdi.CreateRectRgn(0, 0, 0, 0)
+        if not combined:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            for rectangle in rectangles:
+                part = gdi.CreateRectRgn(*rectangle)
+                if not part:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                try:
+                    if not gdi.CombineRgn(combined, combined, part, 2):  # RGN_OR
+                        raise ctypes.WinError(ctypes.get_last_error())
+                finally:
+                    gdi.DeleteObject(part)
+            if not user.SetWindowRgn(glfw.get_win32_window(self.window), combined, True):
+                raise ctypes.WinError(ctypes.get_last_error())
+            combined = None  # SetWindowRgn transfers ownership to Windows.
+            self.visible_regions = rectangles
+        finally:
+            if combined:
+                gdi.DeleteObject(combined)
