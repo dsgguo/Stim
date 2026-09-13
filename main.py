@@ -120,7 +120,7 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
     interactive = mode == 'free' and viewport is None
 
     # 方向文字按频率（即语义）绑定：8Hz=前进、9Hz=左转、10Hz=右转、11Hz=后退
-    captions = {8.0: 'FORWARD', 9.0: 'LEFT', 10.0: 'RIGHT', 11.0: 'BACKWARD'}
+    captions = {8.0: 'FORW', 9.0: 'LEFT', 10.0: 'RIGHT', 11.0: 'BACK'}
     for stimulus in stimuli:
         try:
             freq = float(getattr(stimulus, 'flicker_freq', 0.0))
