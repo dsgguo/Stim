@@ -98,7 +98,7 @@ class Stimulus:
 
         # Static direction caption (drawn on top of the flicker in a constant color)
         self.caption_text = None
-        self.caption_color = (0.0, 0.0, 0.0, 1.0)
+        self.caption_color = (0.55, 0.0, 0.0, 1.0)
         self.caption_vao = None
         self.caption_vbo = None
         self.caption_vertices = 0
@@ -127,7 +127,7 @@ class Stimulus:
         self.border_flash_start_time = time.time()
         self.border_color = color
 
-    def set_caption(self, text, color=(0.0, 0.0, 0.0)):
+    def set_caption(self, text, color=(0.55, 0.0, 0.0)):
         """Show a constant 5x7-bitmap text on the target; the VAO builds lazily on first draw."""
         self.caption_text = (text or '').upper() or None
         self.caption_color = (color[0], color[1], color[2], 1.0)
