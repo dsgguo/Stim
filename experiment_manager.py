@@ -11,11 +11,13 @@ class ExperimentManager:
     """
     def __init__(self, mode, stimuli, trigger_manager=None, feedback_receiver=None,
                  flicker_duration=1.0, rest_interval=1.0, continuous_interval=1.3,
-                 offline_rounds=5):
+                 offline_rounds=5, offline_order='clockwise'):
         if flicker_duration <= 0 or rest_interval <= 0 or continuous_interval <= 0:
             raise ValueError('Stim 时长与间隔参数必须大于 0 秒')
         if offline_rounds < 1:
             raise ValueError('离线采集轮数必须至少为 1')
+        if offline_order not in ('clockwise', 'random'):
+            raise ValueError("Stim 采集顺序必须是 'clockwise' 或 'random'")
         self.mode = mode
         self.stimuli = stimuli
         self.trigger = trigger_manager
@@ -47,6 +49,7 @@ class ExperimentManager:
         self.offline_sequence = []
         self.current_trial_idx = 0
         self.TOTAL_OFFLINE_ROUNDS = int(offline_rounds)
+        self.offline_order = offline_order
 
         # Continuous State
         self.last_tag_time = 0
@@ -223,14 +226,21 @@ class ExperimentManager:
                 self.last_tag_time = time.time()
 
     def _generate_offline_sequence(self, rounds=5):
-        # Block Randomization: Each round contains all stimuli once in random order
+        # 'clockwise'（默认）：每轮按 上→右→下→左 的固定顺时针顺序提示；
+        # 'random'：块内随机化（旧行为），避免被试对顺序产生预期效应。
         self.offline_sequence = []
         ids = list(range(len(self.stimuli)))
 
-        for r in range(rounds):
-            # Shuffle a copy of ids for this round
-            r_ids = ids[:]
-            random.shuffle(r_ids)  # 块内随机化必须开启：固定顺序会让被试产生预期效应
-            self.offline_sequence.extend(r_ids)
+        if self.offline_order == 'clockwise' and len(ids) == 4:
+            # stimuli 位置顺序为 [上, 左, 右, 下]，顺时针即 [上, 右, 下, 左]
+            clockwise = [ids[0], ids[2], ids[3], ids[1]]
+            for r in range(rounds):
+                self.offline_sequence.extend(clockwise)
+        else:
+            for r in range(rounds):
+                # Shuffle a copy of ids for this round
+                r_ids = ids[:]
+                random.shuffle(r_ids)
+                self.offline_sequence.extend(r_ids)
 
         print(f"Generated Sequence ({rounds} rounds, {len(self.offline_sequence)} trials): {self.offline_sequence}")

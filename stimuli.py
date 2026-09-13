@@ -5,6 +5,26 @@ import time
 import ctypes
 
 # basic shaders
+# 5x7 bitmap font for static direction captions drawn on the targets.
+GLYPHS = {
+    'A': ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+    'B': ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+    'C': ["01110", "10001", "10000", "10000", "10000", "10001", "01110"],
+    'D': ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+    'E': ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+    'F': ["11111", "10000", "10000", "11110", "10000", "10000", "10000"],
+    'G': ["01110", "10001", "10000", "10111", "10001", "10001", "01110"],
+    'H': ["10001", "10001", "10001", "11111", "10001", "10001", "10001"],
+    'I': ["01110", "00100", "00100", "00100", "00100", "00100", "01110"],
+    'K': ["10001", "10010", "10100", "11000", "10100", "10010", "10001"],
+    'L': ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
+    'O': ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+    'R': ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+    'T': ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+    'W': ["10001", "10001", "10001", "10101", "10101", "10101", "01010"],
+}
+
+
 VERTEX_SHADER_SOURCE = """
 #version 330 core
 layout (location = 0) in vec3 aPos;
@@ -76,6 +96,13 @@ class Stimulus:
         self.shader = None
         self.num_vertices = 0
 
+        # Static direction caption (drawn on top of the flicker in a constant color)
+        self.caption_text = None
+        self.caption_color = (1.0, 0.0, 0.0, 1.0)
+        self.caption_vao = None
+        self.caption_vbo = None
+        self.caption_vertices = 0
+
     def init_gl(self, shader_program):
         self.shader = shader_program
         self.setup_buffers()
@@ -99,6 +126,50 @@ class Stimulus:
         self.is_flashing_border = True
         self.border_flash_start_time = time.time()
         self.border_color = color
+
+    def set_caption(self, text, color=(1.0, 0.0, 0.0)):
+        """Show a constant 5x7-bitmap text on the target; the VAO builds lazily on first draw."""
+        self.caption_text = (text or '').upper() or None
+        self.caption_color = (color[0], color[1], color[2], 1.0)
+        self.caption_vao = None
+        self.caption_vertices = 0
+
+    def _build_caption_buffers(self, max_cell=0.035, max_width=0.92):
+        text = self.caption_text or ''
+        glyphs = [GLYPHS[ch] for ch in text if ch in GLYPHS]
+        if not glyphs:
+            return
+        total_cells_w = len(glyphs) * 6 - 1
+        cell = min(max_cell, max_width / total_cells_w)
+        width = total_cells_w * cell
+        left = -width / 2.0
+        top = 3.5 * cell
+        vertices = []
+        for gi, rows in enumerate(glyphs):
+            gx = left + gi * 6 * cell
+            for ry, row in enumerate(rows):
+                for cx, flag in enumerate(row):
+                    if flag != '1':
+                        continue
+                    x0 = gx + cx * cell
+                    y0 = top - ry * cell
+                    x1 = x0 + cell
+                    y1 = y0 - cell
+                    vertices += [x0, y0, 0.0, x1, y0, 0.0, x1, y1, 0.0,
+                                 x0, y0, 0.0, x1, y1, 0.0, x0, y1, 0.0]
+        if not vertices:
+            return
+        data = np.array(vertices, dtype=np.float32)
+        self.caption_vao = glGenVertexArrays(1)
+        glBindVertexArray(self.caption_vao)
+        self.caption_vbo = glGenBuffers(1)
+        glBindBuffer(GL_ARRAY_BUFFER, self.caption_vbo)
+        glBufferData(GL_ARRAY_BUFFER, data.nbytes, data, GL_STATIC_DRAW)
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * data.itemsize, ctypes.c_void_p(0))
+        glEnableVertexAttribArray(0)
+        glBindBuffer(GL_ARRAY_BUFFER, 0)
+        glBindVertexArray(0)
+        self.caption_vertices = len(vertices) // 3
 
     def update_alpha(self, current_frame, refresh_rate):
         current_time = time.time()
@@ -190,6 +261,16 @@ class Stimulus:
         glBindVertexArray(self.vao)
         glDrawArrays(GL_TRIANGLE_FAN, 0, self.num_vertices)
         glBindVertexArray(0)
+
+        # 4. Static caption in a constant color, readable during both flicker phases
+        if self.caption_text:
+            if self.caption_vao is None:
+                self._build_caption_buffers()
+            if self.caption_vao is not None:
+                glUniform4f(color_loc, *self.caption_color)
+                glBindVertexArray(self.caption_vao)
+                glDrawArrays(GL_TRIANGLES, 0, self.caption_vertices)
+                glBindVertexArray(0)
 
     def to_dict(self):
         return {

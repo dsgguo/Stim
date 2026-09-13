@@ -99,7 +99,7 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
          feedback_port=5006, topmost=True, auto_start=False, exit_on_complete=False,
          stop_file=None, mouse_passthrough=False, viewport_file=None,
          flicker_duration=None, rest_interval=None, continuous_interval=None,
-         offline_rounds=None):
+         offline_rounds=None, offline_order=None):
     stop_file = os.path.abspath(stop_file) if stop_file else None
     if stop_file and os.path.isfile(stop_file):
         print("Stim start cancelled by manager.", flush=True)
@@ -118,6 +118,17 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
         rect = viewport_layout['rect']
         xpos, ypos, width, height = rect['x'], rect['y'], rect['width'], rect['height']
     interactive = mode == 'free' and viewport is None
+
+    # 方向文字按频率（即语义）绑定：8Hz=前进、9Hz=左转、10Hz=右转、11Hz=后退
+    captions = {8.0: 'FORWARD', 9.0: 'LEFT', 10.0: 'RIGHT', 11.0: 'BACKWARD'}
+    for stimulus in stimuli:
+        try:
+            freq = float(getattr(stimulus, 'flicker_freq', 0.0))
+        except (TypeError, ValueError):
+            continue
+        text = captions.get(freq)
+        if text:
+            stimulus.set_caption(text)
 
     window_mgr = WindowManager(width=width, height=height, title="Stimulus Window", fullscreen=False,
                                xpos=xpos, ypos=ypos, floating=topmost and (mode != 'free' or viewport is not None),
@@ -170,7 +181,8 @@ def main(width=800, height=600, xpos=None, ypos=None, serial_port=None, mode='fr
                     feedback_receiver = None
             timing = resolve_timing(flicker_duration, rest_interval,
                                     continuous_interval, offline_rounds)
-            experiment_mgr = ExperimentManager(mode, stimuli, trigger, feedback_receiver, **timing)
+            experiment_mgr = ExperimentManager(mode, stimuli, trigger, feedback_receiver,
+                                               offline_order=offline_order or 'clockwise', **timing)
             experiment_mgr.start()
 
         # Transparency settings
@@ -554,6 +566,8 @@ if __name__ == "__main__":
                         help="在线连续模式发送标签与取反馈的间隔秒（默认 1.3）")
     parser.add_argument("--offline-rounds", type=int, default=None,
                         help="离线采集轮数，每轮 4 个目标（默认 5）")
+    parser.add_argument("--offline-order", choices=['clockwise', 'random'], default=None,
+                        help="离线提示顺序：clockwise=每轮固定 上右下左 顺时针（默认）；random=块内随机（旧行为）")
     parser.add_argument("--mode", type=str, default=None, choices=['free', 'offline', 'online_discrete', 'online_continuous'], help="Experiment Mode")
     args = parser.parse_args()
 
@@ -561,7 +575,8 @@ if __name__ == "__main__":
     timing_overrides = dict(flicker_duration=args.flicker_duration,
                             rest_interval=args.rest_interval,
                             continuous_interval=args.continuous_interval,
-                            offline_rounds=args.offline_rounds)
+                            offline_rounds=args.offline_rounds,
+                            offline_order=args.offline_order)
 
     if args.mode is not None:
         # CLI explicitly specified mode: single run, no menu loop
